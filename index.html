@@ -59,6 +59,18 @@
             background: #0D47A1;
         }
 
+        button.delete {
+            background: #f44336;
+        }
+
+        button.delete:hover {
+            background: #d32f2f;
+        }
+
+        button.delete:active {
+            background: #b71c1c;
+        }
+
         #canvas {
             border: 2px solid #ddd;
             background: white;
@@ -88,6 +100,25 @@
             margin: 5px 0;
             color: #666;
         }
+
+        #editInput {
+            position: absolute;
+            display: none;
+            padding: 8px 12px;
+            border: 2px solid #4CAF50;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background: white;
+            z-index: 1000;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+
+        #editInput:focus {
+            outline: none;
+            border-color: #2196F3;
+        }
     </style>
 </head>
 <body>
@@ -97,17 +128,21 @@
         <input type="text" id="nodeText" placeholder="새 노드 텍스트 입력">
         <button id="addNode">자식 노드 추가</button>
         <button id="updateNode">선택한 노드 수정</button>
+        <button id="deleteNode" class="delete">선택한 노드 삭제</button>
     </div>
 
     <canvas id="canvas" width="800" height="600"></canvas>
+    <input type="text" id="editInput">
 
     <div class="info">
         <h3>사용 방법</h3>
         <ul>
             <li>노드를 클릭하여 선택합니다 (선택된 노드는 초록색)</li>
             <li>노드를 드래그하여 위치를 이동할 수 있습니다</li>
+            <li>노드를 더블클릭하면 텍스트를 수정할 수 있습니다</li>
             <li>텍스트를 입력하고 "자식 노드 추가" 버튼을 클릭하면 선택된 노드의 자식이 추가됩니다</li>
             <li>"선택한 노드 수정" 버튼으로 선택된 노드의 텍스트를 변경할 수 있습니다</li>
+            <li>"선택한 노드 삭제" 버튼 또는 Delete/Backspace 키로 선택된 노드를 삭제할 수 있습니다 (Root 노드는 삭제 불가)</li>
         </ul>
     </div>
 
@@ -136,6 +171,71 @@
                 app.handle_mouse_up(e);
             });
 
+            // 인라인 편집을 위한 변수
+            const editInput = document.getElementById('editInput');
+            let isEditing = false;
+
+            canvas.addEventListener('dblclick', (e) => {
+                app.handle_double_click(e);
+                const selectedText = app.get_selected_text();
+
+                if (selectedText) {
+                    // Canvas의 위치 계산
+                    const canvasRect = canvas.getBoundingClientRect();
+                    const nodeX = e.offsetX;
+                    const nodeY = e.offsetY;
+
+                    // editInput 위치 설정 (노드 중앙에 배치)
+                    const inputWidth = 120;
+                    editInput.style.left = (canvasRect.left + nodeX - inputWidth / 2) + 'px';
+                    editInput.style.top = (canvasRect.top + nodeY - 20) + 'px';
+                    editInput.style.width = inputWidth + 'px';
+
+                    // editInput에 텍스트 설정 및 표시
+                    editInput.value = selectedText;
+                    editInput.style.display = 'block';
+                    editInput.focus();
+                    editInput.select();
+                    isEditing = true;
+                }
+            });
+
+            // 인라인 편집 완료 함수
+            function finishEditing(save) {
+                if (isEditing) {
+                    if (save && editInput.value.trim()) {
+                        app.update_selected_text(editInput.value.trim());
+                    }
+                    editInput.style.display = 'none';
+                    editInput.value = '';
+                    isEditing = false;
+                }
+            }
+
+            // editInput 이벤트 핸들러
+            editInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    finishEditing(true);
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    finishEditing(false);
+                }
+                e.stopPropagation(); // 다른 키보드 이벤트와 충돌 방지
+            });
+
+            editInput.addEventListener('blur', (e) => {
+                finishEditing(true);
+            });
+
+            // Keyboard events
+            document.addEventListener('keydown', (e) => {
+                // 인라인 편집 중일 때는 노드 삭제 키를 무시
+                if (!isEditing) {
+                    app.handle_key_down(e);
+                }
+            });
+
             // Button events
             document.getElementById('addNode').addEventListener('click', () => {
                 const input = document.getElementById('nodeText');
@@ -153,6 +253,10 @@
                     app.update_selected_text(text);
                     input.value = '';
                 }
+            });
+
+            document.getElementById('deleteNode').addEventListener('click', () => {
+                app.delete_selected_node();
             });
 
             // Enter key support

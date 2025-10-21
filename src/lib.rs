@@ -1,5 +1,5 @@
 use wasm_bindgen::prelude::*;
-use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, MouseEvent};
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, MouseEvent, KeyboardEvent};
 
 #[derive(Clone, Debug)]
 pub struct Node {
@@ -104,6 +104,36 @@ impl MindMap {
         if let Some(node) = self.get_node_mut(id) {
             node.text = text;
         }
+    }
+
+    fn delete_node(&mut self, id: usize) -> bool {
+        // Root 노드는 삭제 불가
+        if self.root_id == Some(id) {
+            return false;
+        }
+
+        // 자식 노드들을 재귀적으로 삭제
+        if let Some(node) = self.get_node(id) {
+            let children_ids: Vec<usize> = node.children.clone();
+            for child_id in children_ids {
+                self.delete_node(child_id);
+            }
+        }
+
+        // 부모 노드의 children 벡터에서 제거
+        for node in &mut self.nodes {
+            node.children.retain(|&child_id| child_id != id);
+        }
+
+        // nodes 벡터에서 제거
+        self.nodes.retain(|n| n.id != id);
+
+        // 선택된 노드가 삭제된 경우 선택 해제
+        if self.selected_node == Some(id) {
+            self.selected_node = None;
+        }
+
+        true
     }
 }
 
@@ -239,5 +269,34 @@ impl MindMapApp {
         self.mind_map.selected_node
             .and_then(|id| self.mind_map.get_node(id))
             .map(|node| node.text.clone())
+    }
+
+    pub fn delete_selected_node(&mut self) -> bool {
+        if let Some(selected_id) = self.mind_map.selected_node {
+            let deleted = self.mind_map.delete_node(selected_id);
+            if deleted {
+                self.render();
+            }
+            deleted
+        } else {
+            false
+        }
+    }
+
+    pub fn handle_key_down(&mut self, event: KeyboardEvent) {
+        let key = event.key();
+        if key == "Delete" || key == "Backspace" {
+            self.delete_selected_node();
+        }
+    }
+
+    pub fn handle_double_click(&mut self, event: MouseEvent) {
+        let x = event.offset_x() as f64;
+        let y = event.offset_y() as f64;
+
+        if let Some(node_id) = self.mind_map.find_node_at(x, y) {
+            self.mind_map.selected_node = Some(node_id);
+            self.render();
+        }
     }
 }
