@@ -18,11 +18,13 @@
             flex-direction: column;
             align-items: center;
             padding: 20px;
+            overflow-x: hidden;
         }
 
         h1 {
             margin-bottom: 20px;
             color: #333;
+            font-size: clamp(1.5rem, 5vw, 2rem);
         }
 
         .controls {
@@ -30,6 +32,10 @@
             display: flex;
             gap: 10px;
             align-items: center;
+            width: 100%;
+            max-width: 800px;
+            flex-wrap: wrap;
+            justify-content: center;
         }
 
         input[type="text"] {
@@ -38,6 +44,7 @@
             border-radius: 4px;
             font-size: 14px;
             width: 200px;
+            min-height: 44px;
         }
 
         button {
@@ -49,6 +56,8 @@
             cursor: pointer;
             font-size: 14px;
             transition: background 0.3s;
+            min-height: 44px;
+            white-space: nowrap;
         }
 
         button:hover {
@@ -76,6 +85,9 @@
             background: white;
             cursor: move;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            touch-action: none;
+            max-width: 100%;
+            display: block;
         }
 
         .info {
@@ -85,11 +97,14 @@
             border-radius: 4px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             max-width: 800px;
+            width: 100%;
         }
 
         .info h3 {
             margin-bottom: 10px;
             color: #2196F3;
+            cursor: pointer;
+            user-select: none;
         }
 
         .info ul {
@@ -99,6 +114,7 @@
         .info li {
             margin: 5px 0;
             color: #666;
+            font-size: 14px;
         }
 
         #editInput {
@@ -119,6 +135,82 @@
             outline: none;
             border-color: #2196F3;
         }
+
+        /* 모바일 반응형 스타일 */
+        @media screen and (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            h1 {
+                margin-bottom: 15px;
+                font-size: 1.5rem;
+            }
+
+            .controls {
+                flex-direction: column;
+                gap: 8px;
+                margin-bottom: 15px;
+            }
+
+            input[type="text"] {
+                width: 100%;
+                max-width: 300px;
+                font-size: 16px;
+            }
+
+            button {
+                width: 100%;
+                max-width: 300px;
+                padding: 12px 16px;
+                font-size: 16px;
+            }
+
+            #canvas {
+                border: 1px solid #ddd;
+            }
+
+            .info {
+                padding: 12px;
+                font-size: 14px;
+            }
+
+            .info h3::after {
+                content: ' ▼';
+                font-size: 0.8em;
+            }
+
+            .info.collapsed h3::after {
+                content: ' ▶';
+            }
+
+            .info.collapsed ul {
+                display: none;
+            }
+
+            .info li {
+                font-size: 13px;
+            }
+
+            #editInput {
+                font-size: 16px;
+                min-width: 200px;
+            }
+        }
+
+        @media screen and (max-width: 480px) {
+            body {
+                padding: 5px;
+            }
+
+            h1 {
+                font-size: 1.3rem;
+            }
+
+            .info {
+                padding: 10px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -131,7 +223,7 @@
         <button id="deleteNode" class="delete">선택한 노드 삭제</button>
     </div>
 
-    <canvas id="canvas" width="800" height="600"></canvas>
+    <canvas id="canvas"></canvas>
     <input type="text" id="editInput">
 
     <div class="info">
@@ -153,10 +245,48 @@
             await init();
 
             const canvas = document.getElementById('canvas');
+
+            // 동적 Canvas 크기 설정
+            function resizeCanvas() {
+                const maxWidth = Math.min(800, window.innerWidth - 40);
+                const maxHeight = Math.min(600, window.innerHeight - 300);
+                canvas.width = maxWidth;
+                canvas.height = maxHeight;
+                if (window.app) {
+                    window.app.render();
+                }
+            }
+
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+
             const app = new MindMapApp(canvas);
+            window.app = app;
 
             // Initial render
             app.render();
+
+            // 좌표 추출 헬퍼 함수
+            function getEventCoordinates(e) {
+                const rect = canvas.getBoundingClientRect();
+                let clientX, clientY;
+
+                if (e.touches && e.touches.length > 0) {
+                    clientX = e.touches[0].clientX;
+                    clientY = e.touches[0].clientY;
+                } else if (e.changedTouches && e.changedTouches.length > 0) {
+                    clientX = e.changedTouches[0].clientX;
+                    clientY = e.changedTouches[0].clientY;
+                } else {
+                    clientX = e.clientX;
+                    clientY = e.clientY;
+                }
+
+                return {
+                    offsetX: clientX - rect.left,
+                    offsetY: clientY - rect.top
+                };
+            }
 
             // Mouse events
             canvas.addEventListener('mousedown', (e) => {
@@ -171,32 +301,86 @@
                 app.handle_mouse_up(e);
             });
 
+            // Touch events (모바일 지원)
+            let lastTouchTime = 0;
+            let touchStartCoords = null;
+
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                const coords = getEventCoordinates(e);
+                touchStartCoords = coords;
+
+                // 더블 탭 감지
+                const currentTime = new Date().getTime();
+                const tapLength = currentTime - lastTouchTime;
+                if (tapLength < 300 && tapLength > 0) {
+                    // 더블 탭 - 새로운 좌표 기반 함수 사용
+                    app.handle_pointer_double_click(coords.offsetX, coords.offsetY);
+                    const selectedText = app.get_selected_text();
+                    if (selectedText) {
+                        showEditInput(coords, selectedText);
+                    }
+                    lastTouchTime = 0;
+                } else {
+                    // 싱글 탭 - 새로운 좌표 기반 함수 사용
+                    app.handle_pointer_down(coords.offsetX, coords.offsetY);
+                    lastTouchTime = currentTime;
+                }
+            }, { passive: false });
+
+            canvas.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                const coords = getEventCoordinates(e);
+                // 새로운 좌표 기반 함수 사용
+                app.handle_pointer_move(coords.offsetX, coords.offsetY);
+            }, { passive: false });
+
+            canvas.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                // 새로운 좌표 기반 함수 사용 (좌표 불필요)
+                app.handle_pointer_up();
+                touchStartCoords = null;
+            }, { passive: false });
+
             // 인라인 편집을 위한 변수
             const editInput = document.getElementById('editInput');
             let isEditing = false;
+
+            function showEditInput(coords, selectedText) {
+                const canvasRect = canvas.getBoundingClientRect();
+                const isMobile = window.innerWidth <= 768;
+
+                if (isMobile) {
+                    // 모바일: 화면 중앙 하단에 배치
+                    const inputWidth = Math.min(250, window.innerWidth - 40);
+                    editInput.style.left = '50%';
+                    editInput.style.top = (canvasRect.bottom + 10) + 'px';
+                    editInput.style.transform = 'translateX(-50%)';
+                    editInput.style.width = inputWidth + 'px';
+                } else {
+                    // 데스크톱: 노드 위치에 배치
+                    const nodeX = coords.offsetX;
+                    const nodeY = coords.offsetY;
+                    const inputWidth = 120;
+                    editInput.style.left = (canvasRect.left + nodeX - inputWidth / 2) + 'px';
+                    editInput.style.top = (canvasRect.top + nodeY - 20) + 'px';
+                    editInput.style.transform = 'none';
+                    editInput.style.width = inputWidth + 'px';
+                }
+
+                editInput.value = selectedText;
+                editInput.style.display = 'block';
+                editInput.focus();
+                editInput.select();
+                isEditing = true;
+            }
 
             canvas.addEventListener('dblclick', (e) => {
                 app.handle_double_click(e);
                 const selectedText = app.get_selected_text();
 
                 if (selectedText) {
-                    // Canvas의 위치 계산
-                    const canvasRect = canvas.getBoundingClientRect();
-                    const nodeX = e.offsetX;
-                    const nodeY = e.offsetY;
-
-                    // editInput 위치 설정 (노드 중앙에 배치)
-                    const inputWidth = 120;
-                    editInput.style.left = (canvasRect.left + nodeX - inputWidth / 2) + 'px';
-                    editInput.style.top = (canvasRect.top + nodeY - 20) + 'px';
-                    editInput.style.width = inputWidth + 'px';
-
-                    // editInput에 텍스트 설정 및 표시
-                    editInput.value = selectedText;
-                    editInput.style.display = 'block';
-                    editInput.focus();
-                    editInput.select();
-                    isEditing = true;
+                    showEditInput({ offsetX: e.offsetX, offsetY: e.offsetY }, selectedText);
                 }
             });
 
@@ -268,6 +452,18 @@
                         e.target.value = '';
                     }
                 }
+            });
+
+            // Info 섹션 접기/펼치기 (모바일)
+            const infoSection = document.querySelector('.info');
+            const infoTitle = document.querySelector('.info h3');
+
+            if (window.innerWidth <= 768) {
+                infoSection.classList.add('collapsed');
+            }
+
+            infoTitle.addEventListener('click', () => {
+                infoSection.classList.toggle('collapsed');
             });
         }
 

@@ -21,13 +21,18 @@ impl Node {
         }
     }
 
-    fn contains_point(&self, px: f64, py: f64) -> bool {
-        let width = 120.0;
-        let height = 40.0;
-        px >= self.x - width / 2.0
-            && px <= self.x + width / 2.0
-            && py >= self.y - height / 2.0
-            && py <= self.y + height / 2.0
+    fn contains_point(&self, px: f64, py: f64, canvas_width: f64) -> bool {
+        // 화면 크기에 따른 노드 크기 (render와 동일)
+        let width = if canvas_width < 600.0 { 100.0 } else { 120.0 };
+        let height = if canvas_width < 600.0 { 35.0 } else { 40.0 };
+
+        // 터치하기 쉽도록 히트박스를 약간 확대 (모바일)
+        let padding = if canvas_width < 600.0 { 5.0 } else { 0.0 };
+
+        px >= self.x - width / 2.0 - padding
+            && px <= self.x + width / 2.0 + padding
+            && py >= self.y - height / 2.0 - padding
+            && py <= self.y + height / 2.0 + padding
     }
 }
 
@@ -63,13 +68,18 @@ impl MindMap {
         id
     }
 
-    fn add_child(&mut self, parent_id: usize, text: String) -> Option<usize> {
+    fn add_child(&mut self, parent_id: usize, text: String, canvas_width: f64) -> Option<usize> {
         let parent_idx = self.nodes.iter().position(|n| n.id == parent_id)?;
         let parent = &self.nodes[parent_idx];
 
         let child_count = parent.children.len();
-        let x = parent.x + 150.0;
-        let y = parent.y + (child_count as f64 * 60.0) - (child_count as f64 * 30.0);
+
+        // 화면 크기에 따라 간격 조정 (작은 화면에서는 간격 축소)
+        let horizontal_spacing = if canvas_width < 600.0 { 120.0 } else { 150.0 };
+        let vertical_spacing = if canvas_width < 600.0 { 50.0 } else { 60.0 };
+
+        let x = parent.x + horizontal_spacing;
+        let y = parent.y + (child_count as f64 * vertical_spacing) - (child_count as f64 * vertical_spacing / 2.0);
 
         let id = self.next_id;
         self.next_id += 1;
@@ -91,9 +101,9 @@ impl MindMap {
         self.nodes.iter_mut().find(|n| n.id == id)
     }
 
-    fn find_node_at(&self, x: f64, y: f64) -> Option<usize> {
+    fn find_node_at(&self, x: f64, y: f64, canvas_width: f64) -> Option<usize> {
         for node in self.nodes.iter().rev() {
-            if node.contains_point(x, y) {
+            if node.contains_point(x, y, canvas_width) {
                 return Some(node.id);
             }
         }
@@ -154,7 +164,14 @@ impl MindMapApp {
             .dyn_into::<CanvasRenderingContext2d>()?;
 
         let mut mind_map = MindMap::new();
-        mind_map.create_root("Root".to_string(), 400.0, 300.0);
+
+        // 동적 Canvas 크기에 맞춰 Root 노드 위치 조정
+        let canvas_width = canvas.width() as f64;
+        let canvas_height = canvas.height() as f64;
+        let root_x = canvas_width / 2.0;
+        let root_y = canvas_height / 2.0;
+
+        mind_map.create_root("Root".to_string(), root_x, root_y);
 
         Ok(MindMapApp {
             canvas,
@@ -164,10 +181,15 @@ impl MindMapApp {
     }
 
     pub fn render(&self) {
-        let width = self.canvas.width() as f64;
-        let height = self.canvas.height() as f64;
+        let canvas_width = self.canvas.width() as f64;
+        let canvas_height = self.canvas.height() as f64;
 
-        self.context.clear_rect(0.0, 0.0, width, height);
+        self.context.clear_rect(0.0, 0.0, canvas_width, canvas_height);
+
+        // 화면 크기에 따른 노드 크기 조정
+        let node_width = if canvas_width < 600.0 { 100.0 } else { 120.0 };
+        let node_height = if canvas_width < 600.0 { 35.0 } else { 40.0 };
+        let font_size = if canvas_width < 600.0 { 12.0 } else { 14.0 };
 
         // Draw connections
         self.context.set_stroke_style_str("#999");
@@ -192,30 +214,31 @@ impl MindMapApp {
                 if is_selected { "#4CAF50" } else { "#2196F3" }
             );
 
-            let width = 120.0;
-            let height = 40.0;
-            let x = node.x - width / 2.0;
-            let y = node.y - height / 2.0;
+            let x = node.x - node_width / 2.0;
+            let y = node.y - node_height / 2.0;
 
-            self.context.fill_rect(x, y, width, height);
+            self.context.fill_rect(x, y, node_width, node_height);
 
             self.context.set_stroke_style_str("#fff");
             self.context.set_line_width(2.0);
-            self.context.stroke_rect(x, y, width, height);
+            self.context.stroke_rect(x, y, node_width, node_height);
 
             self.context.set_fill_style_str("#fff");
-            self.context.set_font("14px Arial");
+            self.context.set_font(&format!("{}px Arial", font_size));
             self.context.set_text_align("center");
             self.context.set_text_baseline("middle");
-            let _ = self.context.fill_text(&node.text, node.x, node.y);
+
+            // 텍스트 렌더링
+            let text = &node.text;
+            let _ = self.context.fill_text(text, node.x, node.y);
         }
     }
 
-    pub fn handle_mouse_down(&mut self, event: MouseEvent) {
-        let x = event.offset_x() as f64;
-        let y = event.offset_y() as f64;
+    // 내부 함수: 좌표 기반 마우스 다운 처리
+    fn handle_down_internal(&mut self, x: f64, y: f64) {
+        let canvas_width = self.canvas.width() as f64;
 
-        if let Some(node_id) = self.mind_map.find_node_at(x, y) {
+        if let Some(node_id) = self.mind_map.find_node_at(x, y, canvas_width) {
             self.mind_map.selected_node = Some(node_id);
             self.mind_map.dragging_node = Some(node_id);
 
@@ -230,11 +253,20 @@ impl MindMapApp {
         }
     }
 
-    pub fn handle_mouse_move(&mut self, event: MouseEvent) {
-        if let Some(node_id) = self.mind_map.dragging_node {
-            let x = event.offset_x() as f64;
-            let y = event.offset_y() as f64;
+    pub fn handle_mouse_down(&mut self, event: MouseEvent) {
+        let x = event.offset_x() as f64;
+        let y = event.offset_y() as f64;
+        self.handle_down_internal(x, y);
+    }
 
+    // 터치 이벤트를 위한 좌표 기반 함수
+    pub fn handle_pointer_down(&mut self, x: f64, y: f64) {
+        self.handle_down_internal(x, y);
+    }
+
+    // 내부 함수: 좌표 기반 마우스 이동 처리
+    fn handle_move_internal(&mut self, x: f64, y: f64) {
+        if let Some(node_id) = self.mind_map.dragging_node {
             let offset_x = self.mind_map.drag_offset_x;
             let offset_y = self.mind_map.drag_offset_y;
 
@@ -247,13 +279,35 @@ impl MindMapApp {
         }
     }
 
-    pub fn handle_mouse_up(&mut self, _event: MouseEvent) {
+    pub fn handle_mouse_move(&mut self, event: MouseEvent) {
+        let x = event.offset_x() as f64;
+        let y = event.offset_y() as f64;
+        self.handle_move_internal(x, y);
+    }
+
+    // 터치 이벤트를 위한 좌표 기반 함수
+    pub fn handle_pointer_move(&mut self, x: f64, y: f64) {
+        self.handle_move_internal(x, y);
+    }
+
+    // 내부 함수: 마우스 업 처리
+    fn handle_up_internal(&mut self) {
         self.mind_map.dragging_node = None;
+    }
+
+    pub fn handle_mouse_up(&mut self, _event: MouseEvent) {
+        self.handle_up_internal();
+    }
+
+    // 터치 이벤트를 위한 좌표 기반 함수
+    pub fn handle_pointer_up(&mut self) {
+        self.handle_up_internal();
     }
 
     pub fn add_child_to_selected(&mut self, text: String) {
         if let Some(selected_id) = self.mind_map.selected_node {
-            self.mind_map.add_child(selected_id, text);
+            let canvas_width = self.canvas.width() as f64;
+            self.mind_map.add_child(selected_id, text, canvas_width);
             self.render();
         }
     }
@@ -290,13 +344,24 @@ impl MindMapApp {
         }
     }
 
-    pub fn handle_double_click(&mut self, event: MouseEvent) {
-        let x = event.offset_x() as f64;
-        let y = event.offset_y() as f64;
+    // 내부 함수: 좌표 기반 더블 클릭 처리
+    fn handle_double_click_internal(&mut self, x: f64, y: f64) {
+        let canvas_width = self.canvas.width() as f64;
 
-        if let Some(node_id) = self.mind_map.find_node_at(x, y) {
+        if let Some(node_id) = self.mind_map.find_node_at(x, y, canvas_width) {
             self.mind_map.selected_node = Some(node_id);
             self.render();
         }
+    }
+
+    pub fn handle_double_click(&mut self, event: MouseEvent) {
+        let x = event.offset_x() as f64;
+        let y = event.offset_y() as f64;
+        self.handle_double_click_internal(x, y);
+    }
+
+    // 터치 이벤트를 위한 좌표 기반 함수
+    pub fn handle_pointer_double_click(&mut self, x: f64, y: f64) {
+        self.handle_double_click_internal(x, y);
     }
 }
