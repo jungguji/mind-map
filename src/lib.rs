@@ -152,6 +152,13 @@ pub struct MindMapApp {
     canvas: HtmlCanvasElement,
     context: CanvasRenderingContext2d,
     mind_map: MindMap,
+// Viewport offset for panning
+    viewport_offset_x: f64,
+    viewport_offset_y: f64,
+    // Panning state
+    is_panning: bool,
+    pan_start_x: f64,
+    pan_start_y: f64,
 }
 
 #[wasm_bindgen]
@@ -177,6 +184,11 @@ impl MindMapApp {
             canvas,
             context,
             mind_map,
+            viewport_offset_x: 0.0,
+            viewport_offset_y: 0.0,
+            is_panning: false,
+            pan_start_x: 0.0,
+            pan_start_y: 0.0,
         })
     }
 
@@ -191,7 +203,7 @@ impl MindMapApp {
         let node_height = if canvas_width < 600.0 { 35.0 } else { 40.0 };
         let font_size = if canvas_width < 600.0 { 12.0 } else { 14.0 };
 
-        // Draw connections
+        // Draw connections with viewport offset
         self.context.set_stroke_style_str("#999");
         self.context.set_line_width(2.0);
 
@@ -199,14 +211,20 @@ impl MindMapApp {
             for child_id in &node.children {
                 if let Some(child) = self.mind_map.get_node(*child_id) {
                     self.context.begin_path();
-                    self.context.move_to(node.x, node.y);
-                    self.context.line_to(child.x, child.y);
+                    self.context.move_to(
+                        node.x + self.viewport_offset_x,
+                        node.y + self.viewport_offset_y
+                    );
+                    self.context.line_to(
+                        child.x + self.viewport_offset_x,
+                        child.y + self.viewport_offset_y
+                    );
                     self.context.stroke();
                 }
             }
         }
 
-        // Draw nodes
+        // Draw nodes with viewport offset
         for node in &self.mind_map.nodes {
             let is_selected = self.mind_map.selected_node == Some(node.id);
 
@@ -214,8 +232,8 @@ impl MindMapApp {
                 if is_selected { "#4CAF50" } else { "#2196F3" }
             );
 
-            let x = node.x - node_width / 2.0;
-            let y = node.y - node_height / 2.0;
+            let x = node.x + self.viewport_offset_x - node_width / 2.0;
+            let y = node.y + self.viewport_offset_y - node_height / 2.0;
 
             self.context.fill_rect(x, y, node_width, node_height);
 
@@ -230,7 +248,11 @@ impl MindMapApp {
 
             // 텍스트 렌더링
             let text = &node.text;
-            let _ = self.context.fill_text(text, node.x, node.y);
+            let _ = self.context.fill_text(
+                text,
+                node.x + self.viewport_offset_x,
+                node.y + self.viewport_offset_y
+            );
         }
     }
 
@@ -238,18 +260,28 @@ impl MindMapApp {
     fn handle_down_internal(&mut self, x: f64, y: f64) {
         let canvas_width = self.canvas.width() as f64;
 
-        if let Some(node_id) = self.mind_map.find_node_at(x, y, canvas_width) {
+        // Convert screen coordinates to virtual canvas coordinates
+        let virtual_x = x - self.viewport_offset_x;
+        let virtual_y = y - self.viewport_offset_y;
+
+        if let Some(node_id) = self.mind_map.find_node_at(virtual_x, virtual_y, canvas_width) {
+            // Node found - start dragging node
             self.mind_map.selected_node = Some(node_id);
             self.mind_map.dragging_node = Some(node_id);
 
             if let Some(node) = self.mind_map.get_node(node_id) {
                 let node_x = node.x;
                 let node_y = node.y;
-                self.mind_map.drag_offset_x = x - node_x;
-                self.mind_map.drag_offset_y = y - node_y;
+                self.mind_map.drag_offset_x = virtual_x - node_x;
+                self.mind_map.drag_offset_y = virtual_y - node_y;
             }
 
             self.render();
+        } else {
+            // No node found - start panning canvas
+            self.is_panning = true;
+            self.pan_start_x = x;
+            self.pan_start_y = y;
         }
     }
 
@@ -266,13 +298,29 @@ impl MindMapApp {
 
     // 내부 함수: 좌표 기반 마우스 이동 처리
     fn handle_move_internal(&mut self, x: f64, y: f64) {
-        if let Some(node_id) = self.mind_map.dragging_node {
+        if self.is_panning {
+            // Panning canvas
+            let dx = x - self.pan_start_x;
+            let dy = y - self.pan_start_y;
+
+            self.viewport_offset_x += dx;
+            self.viewport_offset_y += dy;
+
+            self.pan_start_x = x;
+            self.pan_start_y = y;
+
+            self.render();
+        } else if let Some(node_id) = self.mind_map.dragging_node {
+            // Dragging node
+            let virtual_x = x - self.viewport_offset_x;
+            let virtual_y = y - self.viewport_offset_y;
+
             let offset_x = self.mind_map.drag_offset_x;
             let offset_y = self.mind_map.drag_offset_y;
 
             if let Some(node) = self.mind_map.get_node_mut(node_id) {
-                node.x = x - offset_x;
-                node.y = y - offset_y;
+                node.x = virtual_x - offset_x;
+                node.y = virtual_y - offset_y;
             }
 
             self.render();
@@ -293,6 +341,7 @@ impl MindMapApp {
     // 내부 함수: 마우스 업 처리
     fn handle_up_internal(&mut self) {
         self.mind_map.dragging_node = None;
+        self.is_panning = false;
     }
 
     pub fn handle_mouse_up(&mut self, _event: MouseEvent) {
