@@ -29,6 +29,7 @@ impl MindMap {
         let node = Node::new(id, text, x, y);
         self.nodes.push(node);
         self.root_id = Some(id);
+        self.selected_node = Some(id);
         id
     }
 
