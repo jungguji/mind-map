@@ -27,11 +27,25 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        run: cargo install wasm-pack --locked
 
       - name: Build WASM
-        run: wasm-pack build --target web
+        run: wasm-pack build --target web --release
+
+      - name: Prepare deployment
+        run: |
+          # 불필요한 파일 제거
+          rm -rf target
+          rm -rf src
+          rm -f Cargo.toml Cargo.lock setup.sh
+          rm -rf .github
+          ls -la
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
