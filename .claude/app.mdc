@@ -1,0 +1,395 @@
+# MindMapApp - Application Controller
+
+> **File:** `src/app.rs`
+> **Role:** Main application controller, event handling, viewport management, rendering
+> **Exposed to:** JavaScript via wasm-bindgen
+
+---
+
+## Quick Reference
+
+**Primary Responsibilities:**
+- Handle all user input (mouse, touch, keyboard)
+- Manage viewport state (panning, offset)
+- Coordinate rendering
+- Manage multi-selection and dragging state
+
+**Key Pattern:**
+```
+Event ’ handle_*_internal() ’ Update State ’ render()
+```
+
+---
+
+## API Schema
+
+```json
+{
+  "structs": {
+    "MindMapApp": {
+      "visibility": "public",
+      "wasm_bindgen": true,
+      "fields": {
+        "canvas": {
+          "type": "HtmlCanvasElement",
+          "description": "HTML canvas element reference"
+        },
+        "context": {
+          "type": "CanvasRenderingContext2d",
+          "description": "2D rendering context"
+        },
+        "mind_map": {
+          "type": "MindMap",
+          "description": "Mind map data structure"
+        },
+        "viewport_offset_x": {
+          "type": "f64",
+          "description": "Horizontal pan offset"
+        },
+        "viewport_offset_y": {
+          "type": "f64",
+          "description": "Vertical pan offset"
+        },
+        "is_panning": {
+          "type": "bool",
+          "description": "Active panning state"
+        },
+        "pan_start_x": {
+          "type": "f64",
+          "description": "Pan starting X coordinate"
+        },
+        "pan_start_y": {
+          "type": "f64",
+          "description": "Pan starting Y coordinate"
+        },
+        "is_space_pressed": {
+          "type": "bool",
+          "description": "Space key state (for forced panning)"
+        },
+        "selection_box": {
+          "type": "Option<SelectionBox>",
+          "description": "Active area selection rectangle"
+        }
+      }
+    },
+    "SelectionBox": {
+      "visibility": "private",
+      "fields": {
+        "start_x": "f64",
+        "start_y": "f64",
+        "end_x": "f64",
+        "end_y": "f64"
+      },
+      "purpose": "Area selection drag rectangle"
+    }
+  },
+  "methods": {
+    "constructor": {
+      "name": "new",
+      "signature": "fn new(canvas: HtmlCanvasElement) -> Result<MindMapApp, JsValue>",
+      "parameters": [
+        {
+          "name": "canvas",
+          "type": "HtmlCanvasElement",
+          "description": "HTML canvas element"
+        }
+      ],
+      "returns": {
+        "type": "Result<MindMapApp, JsValue>",
+        "success": "Initialized app instance",
+        "error": "Canvas context creation failed"
+      },
+      "side_effects": [
+        "Creates 2D rendering context",
+        "Creates root node at canvas center",
+        "Initializes viewport at (0, 0)"
+      ]
+    },
+    "event_handlers": {
+      "mouse": [
+        {
+          "name": "handle_mouse_down",
+          "signature": "fn handle_mouse_down(&mut self, event: MouseEvent)",
+          "triggers": [
+            "Space pressed: Start panning",
+            "Click node: Select + prepare drag",
+            "Click empty: Start selection box"
+          ]
+        },
+        {
+          "name": "handle_mouse_move",
+          "signature": "fn handle_mouse_move(&mut self, event: MouseEvent)",
+          "triggers": [
+            "is_panning: Update viewport offset",
+            "selection_box: Update box size",
+            "dragging_nodes: Update node positions"
+          ]
+        },
+        {
+          "name": "handle_mouse_up",
+          "signature": "fn handle_mouse_up(&mut self, event: MouseEvent)",
+          "triggers": [
+            "Complete area selection",
+            "End node dragging",
+            "End panning"
+          ]
+        },
+        {
+          "name": "handle_double_click",
+          "signature": "fn handle_double_click(&mut self, event: MouseEvent)",
+          "triggers": [
+            "Select clicked node (single)",
+            "Triggers edit mode in UI"
+          ]
+        }
+      ],
+      "touch": [
+        {
+          "name": "handle_pointer_down",
+          "signature": "fn handle_pointer_down(&mut self, x: f64, y: f64)",
+          "note": "Coordinate-based for touch events"
+        },
+        {
+          "name": "handle_pointer_move",
+          "signature": "fn handle_pointer_move(&mut self, x: f64, y: f64)"
+        },
+        {
+          "name": "handle_pointer_up",
+          "signature": "fn handle_pointer_up(&mut self)"
+        },
+        {
+          "name": "handle_pointer_double_click",
+          "signature": "fn handle_pointer_double_click(&mut self, x: f64, y: f64)"
+        }
+      ],
+      "keyboard": [
+        {
+          "name": "handle_key_down",
+          "signature": "fn handle_key_down(&mut self, event: KeyboardEvent)",
+          "keys": {
+            "Delete": "Delete selected nodes",
+            "Backspace": "Delete selected nodes"
+          }
+        },
+        {
+          "name": "set_space_pressed",
+          "signature": "fn set_space_pressed(&mut self, pressed: bool)",
+          "purpose": "Enable/disable forced panning mode"
+        }
+      ]
+    },
+    "node_operations": [
+      {
+        "name": "add_child_to_selected",
+        "signature": "fn add_child_to_selected(&mut self, text: String)",
+        "precondition": "Exactly 1 node selected",
+        "behavior": "Adds child to selected node, no-op if 0 or 2+ nodes selected"
+      },
+      {
+        "name": "update_selected_text",
+        "signature": "fn update_selected_text(&mut self, text: String)",
+        "precondition": "Exactly 1 node selected"
+      },
+      {
+        "name": "get_selected_text",
+        "signature": "fn get_selected_text(&self) -> Option<String>",
+        "returns": "Some(text) if exactly 1 node selected, None otherwise"
+      },
+      {
+        "name": "delete_selected_node",
+        "signature": "fn delete_selected_node(&mut self) -> bool",
+        "returns": "true if any nodes deleted (root protected)"
+      }
+    ],
+    "rendering": {
+      "name": "render",
+      "signature": "fn render(&self)",
+      "render_order": [
+        "1. Clear canvas",
+        "2. Draw node connections (lines)",
+        "3. Draw nodes (rectangles + text)",
+        "4. Draw selection box (if active)"
+      ],
+      "visual_styling": {
+        "selected_node": {
+          "color": "#4CAF50",
+          "border": "3px white"
+        },
+        "unselected_node": {
+          "color": "#2196F3",
+          "border": "2px white"
+        },
+        "selection_box": {
+          "stroke": "#4CAF50",
+          "fill": "rgba(76, 175, 80, 0.1)"
+        }
+      }
+    }
+  }
+}
+```
+
+---
+
+## State Machine
+
+```json
+{
+  "states": {
+    "idle": {
+      "description": "No active interaction",
+      "transitions": {
+        "mousedown + space_pressed": "panning",
+        "mousedown + on_node": "dragging_nodes",
+        "mousedown + empty_space": "selecting_area"
+      }
+    },
+    "panning": {
+      "active_flags": ["is_panning"],
+      "updates": ["viewport_offset_x", "viewport_offset_y"],
+      "on_move": "Update viewport offset",
+      "on_up": "idle"
+    },
+    "dragging_nodes": {
+      "active_data": ["mind_map.dragging_nodes", "mind_map.drag_offsets"],
+      "on_move": "Update all dragging node positions",
+      "on_up": "Clear dragging state, idle"
+    },
+    "selecting_area": {
+      "active_data": ["selection_box"],
+      "on_move": "Update selection_box.end_x/y",
+      "on_up": "Find nodes in rect, update selected_nodes, idle"
+    }
+  }
+}
+```
+
+---
+
+## Coordinate System
+
+```json
+{
+  "coordinate_spaces": {
+    "screen_coordinates": {
+      "origin": "Canvas top-left (0, 0)",
+      "units": "pixels",
+      "bounded": "Canvas dimensions",
+      "source": "MouseEvent.offsetX/offsetY"
+    },
+    "virtual_coordinates": {
+      "origin": "Initial canvas center (where root node is)",
+      "units": "pixels",
+      "bounded": "Infinite",
+      "formula": "virtual = screen - viewport_offset",
+      "usage": "Node positions stored here"
+    }
+  },
+  "conversion": {
+    "screen_to_virtual": "virtual_x = screen_x - viewport_offset_x",
+    "virtual_to_screen": "screen_x = virtual_x + viewport_offset_x"
+  }
+}
+```
+
+---
+
+## Common Patterns
+
+### Pattern: Multi-Node Selection
+```rust
+// On mouse down (empty space)
+self.selection_box = Some(SelectionBox { start_x: x, start_y: y, end_x: x, end_y: y });
+
+// On mouse move
+if let Some(ref mut box_) = self.selection_box {
+    box_.end_x = x;
+    box_.end_y = y;
+}
+
+// On mouse up
+if let Some(box_) = self.selection_box.take() {
+    let nodes = self.mind_map.find_nodes_in_rect(...);
+    self.mind_map.clear_selection();
+    for id in nodes { self.mind_map.selected_nodes.insert(id); }
+}
+```
+
+### Pattern: Multi-Node Dragging
+```rust
+// On mouse down (on node)
+for &node_id in &self.mind_map.selected_nodes {
+    let node = self.mind_map.get_node(node_id)?;
+    let offset = (virtual_x - node.x, virtual_y - node.y);
+    self.mind_map.drag_offsets.insert(node_id, offset);
+    self.mind_map.dragging_nodes.insert(node_id);
+}
+
+// On mouse move
+for &node_id in &self.mind_map.dragging_nodes {
+    let (ox, oy) = self.mind_map.drag_offsets[&node_id];
+    let node = self.mind_map.get_node_mut(node_id)?;
+    node.x = virtual_x - ox;
+    node.y = virtual_y - oy;
+}
+```
+
+---
+
+## Performance Notes
+
+- **Full redraw on every change** - Simple, reliable (no dirty tracking)
+- **Viewport offset** - O(1) per-node translation during render
+- **Event handling** - Immediate update + render (no batching)
+- **Typical load** - 10-100 nodes, 60fps easily achievable
+
+---
+
+## JavaScript Integration Example
+
+```javascript
+import init, { MindMapApp } from './pkg/mind_map.js';
+
+await init();
+const canvas = document.getElementById('canvas');
+const app = new MindMapApp(canvas);
+
+// Mouse
+canvas.addEventListener('mousedown', (e) => app.handle_mouse_down(e));
+canvas.addEventListener('mousemove', (e) => app.handle_mouse_move(e));
+canvas.addEventListener('mouseup', (e) => app.handle_mouse_up(e));
+
+// Keyboard (Space for panning)
+document.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') app.set_space_pressed(true);
+});
+document.addEventListener('keyup', (e) => {
+    if (e.code === 'Space') app.set_space_pressed(false);
+});
+
+// Add node
+app.add_child_to_selected("New Task");
+```
+
+---
+
+## Key Design Decisions
+
+1. **Why viewport offset instead of transforming canvas?**
+   - Canvas transforms affect all drawing (including text)
+   - Manual offset gives precise control
+   - Easier to convert between coordinate spaces
+
+2. **Why full redraw?**
+   - Simple mental model
+   - No state tracking bugs
+   - Canvas operations are fast enough
+
+3. **Why internal `handle_*_internal` methods?**
+   - Coordinate conversion in one place
+   - Unified logic for mouse + touch
+   - Cleaner separation of concerns
+
+---
+
+**Last Updated:** 2025-10-25

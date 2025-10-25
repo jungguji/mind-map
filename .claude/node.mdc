@@ -1,0 +1,366 @@
+# Node - Basic Data Structure
+
+> **File:** `src/node.rs`
+> **Role:** Individual node data, hit detection
+> **Used by:** MindMap
+
+---
+
+## Quick Reference
+
+**What is a Node:**
+- Single mind map node with text, position, and children
+- Cloneable, debuggable
+- Center-based positioning (x, y = center point)
+- Responsive sizing for mobile/desktop
+
+**Key Methods:**
+- `new()` - Create node
+- `contains_point()` - Hit detection
+
+---
+
+## API Schema
+
+```json
+{
+  "struct": {
+    "name": "Node",
+    "derives": ["Clone", "Debug"],
+    "visibility": "public",
+    "fields": {
+      "id": {
+        "type": "usize",
+        "description": "Unique identifier (assigned by MindMap)",
+        "immutable_after_creation": true
+      },
+      "text": {
+        "type": "String",
+        "description": "Display text",
+        "editable": true
+      },
+      "x": {
+        "type": "f64",
+        "description": "X position (CENTER of node, virtual coordinates)"
+      },
+      "y": {
+        "type": "f64",
+        "description": "Y position (CENTER of node, virtual coordinates)"
+      },
+      "children": {
+        "type": "Vec<usize>",
+        "description": "Child node IDs (parent ’ child relationship)",
+        "managed_by": "MindMap.add_child()"
+      }
+    }
+  },
+  "methods": {
+    "new": {
+      "signature": "fn new(id: usize, text: String, x: f64, y: f64) -> Self",
+      "parameters": {
+        "id": "Unique ID from MindMap.next_id",
+        "text": "Initial text",
+        "x": "Center X position",
+        "y": "Center Y position"
+      },
+      "returns": "Node with empty children Vec",
+      "example": "Node::new(0, \"Root\".into(), 400.0, 300.0)"
+    },
+    "contains_point": {
+      "signature": "fn contains_point(&self, px: f64, py: f64, canvas_width: f64) -> bool",
+      "parameters": {
+        "px": "Point X coordinate (virtual)",
+        "py": "Point Y coordinate (virtual)",
+        "canvas_width": "Canvas width (for responsive sizing)"
+      },
+      "returns": "true if point inside node bounds",
+      "algorithm": [
+        "1. Determine node width/height based on canvas_width",
+        "2. Add padding for mobile (<600px)",
+        "3. Check if point in rectangle [x-w/2, y-h/2, x+w/2, y+h/2]"
+      ],
+      "use_case": "Click detection, hover detection"
+    }
+  }
+}
+```
+
+---
+
+## Responsive Sizing
+
+```json
+{
+  "breakpoint": 600.0,
+  "desktop": {
+    "condition": "canvas_width >= 600.0",
+    "node_width": 120.0,
+    "node_height": 40.0,
+    "font_size": 14.0,
+    "touch_padding": 0.0
+  },
+  "mobile": {
+    "condition": "canvas_width < 600.0",
+    "node_width": 100.0,
+    "node_height": 35.0,
+    "font_size": 12.0,
+    "touch_padding": 5.0
+  }
+}
+```
+
+**Touch Padding:**
+- Mobile only: +5px on all sides
+- Increases clickable area without visual change
+- Makes nodes easier to tap on small screens
+
+---
+
+## Coordinate System
+
+```json
+{
+  "position": {
+    "x_y_meaning": "CENTER point of node rectangle",
+    "coordinate_space": "Virtual (infinite canvas)",
+    "rendering_conversion": "top_left = (x - width/2, y - height/2)"
+  },
+  "hit_detection": {
+    "left_edge": "x - width/2 - padding",
+    "right_edge": "x + width/2 + padding",
+    "top_edge": "y - height/2 - padding",
+    "bottom_edge": "y + height/2 + padding"
+  }
+}
+```
+
+**Why Center-Based:**
+- Natural reference for rotations/scaling (future)
+- Easy connection line calculations
+- Symmetric positioning
+
+---
+
+## Hit Detection Algorithm
+
+```rust
+// Simplified pseudocode
+fn contains_point(px, py, canvas_width) -> bool {
+    // 1. Determine dimensions
+    let (width, height, padding) = if canvas_width < 600.0 {
+        (100.0, 35.0, 5.0)  // Mobile
+    } else {
+        (120.0, 40.0, 0.0)  // Desktop
+    };
+
+    // 2. Calculate bounds
+    let left = self.x - width/2.0 - padding;
+    let right = self.x + width/2.0 + padding;
+    let top = self.y - height/2.0 - padding;
+    let bottom = self.y + height/2.0 + padding;
+
+    // 3. Rectangle check
+    px >= left && px <= right && py >= top && py <= bottom
+}
+```
+
+**Performance:** O(1) - Simple arithmetic
+
+---
+
+## Relationship Management
+
+```json
+{
+  "parent_child": {
+    "representation": "Parent stores child IDs in children Vec",
+    "creation": "MindMap.add_child() appends to parent.children",
+    "deletion": "MindMap.delete_node() cleans up parent.children",
+    "traversal": {
+      "downward": "Easy - iterate node.children",
+      "upward": "Harder - O(n) search through all nodes"
+    }
+  },
+  "no_parent_reference": {
+    "reason": "Avoids Rust ownership complexity",
+    "workaround": "Iterate all nodes to find parent if needed"
+  }
+}
+```
+
+---
+
+## Usage Patterns
+
+### Pattern: Create Node (via MindMap)
+```rust
+// Direct (rarely used)
+let node = Node::new(0, "My Node".into(), 300.0, 200.0);
+
+// Via MindMap (recommended)
+let id = mind_map.add_child(parent_id, "Child".into(), 800.0)?;
+```
+
+### Pattern: Access Children
+```rust
+let node = mind_map.get_node(node_id)?;
+for &child_id in &node.children {
+    let child = mind_map.get_node(child_id)?;
+    println!("Child: {}", child.text);
+}
+```
+
+### Pattern: Hit Test
+```rust
+if node.contains_point(mouse_x, mouse_y, canvas_width) {
+    println!("Node clicked: {}", node.id);
+}
+```
+
+### Pattern: Update Position
+```rust
+let node = mind_map.get_node_mut(node_id)?;
+node.x += delta_x;
+node.y += delta_y;
+```
+
+### Pattern: Update Text
+```rust
+let node = mind_map.get_node_mut(node_id)?;
+node.text = "New Text".into();
+// Or use MindMap.update_node_text(id, text)
+```
+
+---
+
+## Rendering Consideration
+
+```json
+{
+  "critical_match": {
+    "issue": "Hit detection MUST match rendered bounds",
+    "consequence": "Mismatch causes clicks to miss nodes",
+    "solution": "Both use same width/height/padding formulas"
+  },
+  "render_code": {
+    "location": "app.rs render()",
+    "calculation": {
+      "width": "if canvas_width < 600.0 { 100.0 } else { 120.0 }",
+      "height": "if canvas_width < 600.0 { 35.0 } else { 40.0 }",
+      "top_left_x": "node.x + viewport_offset_x - width/2.0",
+      "top_left_y": "node.y + viewport_offset_y - height/2.0"
+    }
+  }
+}
+```
+
+---
+
+## Memory & Performance
+
+```json
+{
+  "size_estimate": {
+    "id": "8 bytes",
+    "text": "24 bytes (String header) + text length",
+    "x": "8 bytes",
+    "y": "8 bytes",
+    "children": "24 bytes (Vec header) + 8*num_children",
+    "typical": "~100 bytes per node (assuming short text, 2-3 children)"
+  },
+  "clone_cost": {
+    "id_x_y": "O(1) copy",
+    "text": "O(n) where n = text length",
+    "children": "O(m) where m = children count",
+    "typical": "Fast - most nodes have short text and few children"
+  }
+}
+```
+
+---
+
+## Design Rationale
+
+```json
+{
+  "why_clone_debug": {
+    "Clone": "Enables undo/redo, node duplication, safe iteration during modification",
+    "Debug": "Helpful for debugging, logging, error messages"
+  },
+  "why_public_fields": {
+    "reason": "Simple access, no getter/setter boilerplate",
+    "trade_off": "No encapsulation, but Node is data-only struct",
+    "acceptable": "MindMap enforces invariants, not Node"
+  },
+  "why_center_positioning": {
+    "reasons": [
+      "Natural reference for connections",
+      "Easier rotation/scaling (future)",
+      "Symmetric positioning calculations"
+    ]
+  },
+  "why_store_child_ids": {
+    "reason": "No Rust ownership issues, easy serialization",
+    "alternative": "Rc<RefCell<Node>> tree - more complex",
+    "verdict": "ID references win for simplicity"
+  }
+}
+```
+
+---
+
+## Invariants
+
+```json
+{
+  "invariants": [
+    {
+      "rule": "id never changes after creation",
+      "enforcement": "No setter, assigned in new()"
+    },
+    {
+      "rule": "children contains only valid node IDs",
+      "enforcement": "Managed by MindMap, cleaned up on delete"
+    },
+    {
+      "rule": "x, y can be any f64 value",
+      "note": "Infinite virtual canvas"
+    }
+  ]
+}
+```
+
+---
+
+## Future Extensions
+
+```json
+{
+  "possible_fields": {
+    "color": {
+      "type": "String",
+      "description": "Custom node color (#RRGGBB)",
+      "use": "Visual categorization"
+    },
+    "icon": {
+      "type": "Option<String>",
+      "description": "Icon identifier or emoji",
+      "use": "Visual enrichment"
+    },
+    "collapsed": {
+      "type": "bool",
+      "description": "Hide children when true",
+      "use": "Focus, large maps"
+    },
+    "metadata": {
+      "type": "HashMap<String, String>",
+      "description": "User-defined key-value data",
+      "use": "Tags, priorities, dates, etc"
+    }
+  }
+}
+```
+
+---
+
+**Last Updated:** 2025-10-25

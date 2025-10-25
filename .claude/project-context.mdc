@@ -1,0 +1,469 @@
+# Mind Map - Project Context
+
+> **Project:** Interactive Mind Map Application
+> **Tech:** Rust + WebAssembly + HTML5 Canvas
+> **Purpose:** LLM-optimized quick reference for development tasks
+
+---
+
+## 30-Second Overview
+
+```
+Mind Map = Rust/WASM app for creating interactive node diagrams
+- Multi-node selection (drag box to select)
+- Multi-node dragging (move multiple nodes together)
+- Canvas panning (Space+drag or 2-finger touch)
+- Responsive (desktop + mobile)
+```
+
+---
+
+## Architecture Quick Map
+
+```
+┌─────────────────────────────────────┐
+│   JavaScript (index.html)           │
+│   • Event capture & conversion      │
+│   • Touch gesture detection         │
+│   • UI controls                     │
+└───────────┬─────────────────────────┘
+            │ wasm-bindgen
+            v
+┌─────────────────────────────────────┐
+│   MindMapApp (app.rs)               │  ← Event router, viewport manager
+│   • Mouse/touch/keyboard handlers   │
+│   • Viewport offset (panning)       │
+│   • Selection box rendering         │
+│   • Canvas rendering orchestration  │
+└───────────┬─────────────────────────┘
+            │ owns
+            v
+┌─────────────────────────────────────┐
+│   MindMap (mind_map.rs)             │  ← Data structure, selection state
+│   • Vec<Node> storage               │
+│   • HashSet<usize> selected_nodes   │
+│   • HashMap<usize, (f64,f64)> offsets│
+│   • Spatial queries                 │
+└───────────┬─────────────────────────┘
+            │ contains
+            v
+┌─────────────────────────────────────┐
+│   Node (node.rs)                    │  ← Basic data unit
+│   • id, text, x, y                  │
+│   • Vec<usize> children             │
+│   • contains_point() hit detection  │
+└─────────────────────────────────────┘
+```
+
+---
+
+## File Locations
+
+```json
+{
+  "source": {
+    "lib.rs": "Entry point, module exports",
+    "app.rs": "Application controller (MindMapApp)",
+    "mind_map.rs": "Data structure (MindMap)",
+    "node.rs": "Node definition"
+  },
+  "frontend": {
+    "index.html": "UI, JavaScript integration, touch handlers"
+  },
+  "build": {
+    "Cargo.toml": "Rust dependencies",
+    "pkg/": "Generated WASM output (after wasm-pack build)"
+  },
+  "docs": {
+    "docs/": "Human-readable Markdown docs",
+    ".claude/": "LLM-optimized context files (you are here)"
+  }
+}
+```
+
+---
+
+## Key Concepts
+
+### 1. Coordinate Spaces
+```json
+{
+  "screen_coordinates": {
+    "origin": "Canvas top-left (0, 0)",
+    "source": "MouseEvent.offsetX/offsetY",
+    "bounded": "Canvas dimensions"
+  },
+  "virtual_coordinates": {
+    "origin": "Arbitrary (where root node starts)",
+    "storage": "Node.x, Node.y",
+    "bounded": "Infinite",
+    "conversion": "virtual = screen - viewport_offset"
+  }
+}
+```
+
+### 2. Selection State
+```json
+{
+  "single_selection": "selected_nodes = {node_id}",
+  "multi_selection": "selected_nodes = {id1, id2, id3, ...}",
+  "area_selection": "Drag box → find_nodes_in_rect() → selected_nodes",
+  "drag_state": "dragging_nodes + drag_offsets (per-node cursor offset)"
+}
+```
+
+### 3. Event Flow
+```
+User Input → JavaScript → WASM Event Handler → Update State → render()
+                                 ↓
+                    (Convert screen → virtual coords)
+                                 ↓
+                    Query MindMap (find node, update position)
+                                 ↓
+                    Trigger full canvas redraw
+```
+
+---
+
+## Common Development Tasks
+
+### Add New Node Property
+
+**Files to modify:**
+1. `src/node.rs` - Add field to `Node` struct
+2. `src/mind_map.rs` - Update `add_child()` or `create_root()` if needed
+3. `src/app.rs` - Update `render()` if visual change
+4. `index.html` - Add UI controls if user-editable
+
+**Example: Add node color**
+```rust
+// node.rs
+pub struct Node {
+    // existing fields...
+    pub color: String,  // Add this
+}
+
+// Update Node::new()
+pub fn new(id, text, x, y) -> Self {
+    Node {
+        // ...
+        color: "#2196F3".to_string(),  // Default blue
+    }
+}
+
+// app.rs render()
+self.context.set_fill_style_str(&node.color);  // Use node color
+```
+
+---
+
+### Add New Event Handler
+
+**Files to modify:**
+1. `src/app.rs` - Add public `handle_*()` method (with `#[wasm_bindgen]`)
+2. `index.html` - Add event listener
+
+**Example: Add right-click context menu**
+```rust
+// app.rs
+#[wasm_bindgen]
+pub fn handle_context_menu(&mut self, event: MouseEvent) -> bool {
+    let x = event.offset_x() as f64;
+    let y = event.offset_y() as f64;
+    let virtual_x = x - self.viewport_offset_x;
+    let virtual_y = y - self.viewport_offset_y;
+
+    if let Some(node_id) = self.mind_map.find_node_at(virtual_x, virtual_y, self.canvas.width() as f64) {
+        // Handle right-click on node
+        true  // Prevent default
+    } else {
+        false  // Allow default
+    }
+}
+
+// index.html
+canvas.addEventListener('contextmenu', (e) => {
+    if (app.handle_context_menu(e)) {
+        e.preventDefault();
+    }
+});
+```
+
+---
+
+### Change Visual Appearance
+
+**Files to modify:**
+1. `src/app.rs` - `render()` method
+2. `src/node.rs` - `contains_point()` if hit box changes
+
+**Example: Round corners**
+```rust
+// app.rs render()
+// Instead of fill_rect:
+self.context.begin_path();
+self.context.move_to(x + radius, y);
+// ... (rounded rect path)
+self.context.fill();
+```
+
+---
+
+### Add Spatial Query
+
+**Files to modify:**
+1. `src/mind_map.rs` - Add query method
+
+**Example: Find nearest node**
+```rust
+// mind_map.rs
+pub fn find_nearest_node(&self, x: f64, y: f64) -> Option<usize> {
+    self.nodes.iter()
+        .map(|n| (n.id, ((n.x - x).powi(2) + (n.y - y).powi(2)).sqrt()))
+        .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+        .map(|(id, _)| id)
+}
+```
+
+---
+
+## Design Patterns in Codebase
+
+### Pattern: Internal Handler
+```rust
+// Public method (JS-facing)
+pub fn handle_mouse_down(&mut self, event: MouseEvent) {
+    let x = event.offset_x() as f64;
+    let y = event.offset_y() as f64;
+    self.handle_down_internal(x, y);  // Delegate
+}
+
+// Private method (coordinate-based, reusable)
+fn handle_down_internal(&mut self, x: f64, y: f64) {
+    // Actual logic here
+}
+
+// Touch handler reuses internal method
+pub fn handle_pointer_down(&mut self, x: f64, y: f64) {
+    self.handle_down_internal(x, y);
+}
+```
+
+**Why:** Coordinate conversion in one place, logic reused for mouse + touch
+
+---
+
+### Pattern: State Machine Transitions
+```rust
+// Check current state → transition
+if self.is_panning {
+    // Panning mode: update viewport
+} else if let Some(ref mut box_) = self.selection_box {
+    // Selecting mode: update box
+} else if !self.mind_map.dragging_nodes.is_empty() {
+    // Dragging mode: update nodes
+}
+```
+
+**Why:** Clear state separation, mutually exclusive modes
+
+---
+
+### Pattern: Flat Storage + ID Lookup
+```rust
+// Storage
+nodes: Vec<Node>  // All nodes in flat array
+
+// Lookup
+pub fn get_node(&self, id: usize) -> Option<&Node> {
+    self.nodes.iter().find(|n| n.id == id)
+}
+```
+
+**Why:** Simple, cache-friendly, serializable
+
+---
+
+## Performance Characteristics
+
+```json
+{
+  "typical_workload": {
+    "nodes": "10-100",
+    "depth": "3-5 levels",
+    "fps": "60 (full redraws)"
+  },
+  "hot_paths": {
+    "render()": "O(n) - draws all nodes every frame",
+    "find_node_at()": "O(n) - checks all nodes on click",
+    "handle_move()": "O(k) where k = dragging_nodes count"
+  },
+  "bottlenecks": {
+    "none": "Current design handles 100s of nodes easily",
+    "future": "Consider spatial indexing at 1000+ nodes"
+  }
+}
+```
+
+---
+
+## Build & Deploy
+
+```bash
+# Development
+wasm-pack build --target web         # Compile Rust → WASM
+python3 -m http.server 8000          # Serve locally
+# Open http://localhost:8000
+
+# Production
+wasm-pack build --target web --release
+# Deploy pkg/ + index.html to static host
+```
+
+---
+
+## Quick Debugging Tips
+
+### Problem: Clicks miss nodes
+**Check:**
+1. `node.rs` `contains_point()` dimensions
+2. `app.rs` `render()` dimensions
+3. Ensure both use same width/height/padding
+
+### Problem: Panning doesn't work
+**Check:**
+1. `is_space_pressed` flag in app.rs
+2. JavaScript keydown/keyup handlers in index.html
+3. `viewport_offset_x/y` being applied in render()
+
+### Problem: Selection box not visible
+**Check:**
+1. `selection_box` being set in `handle_down_internal()`
+2. `selection_box` rendering in `render()`
+3. CSS `touch-action: none` on canvas
+
+### Problem: Multi-drag broken
+**Check:**
+1. `drag_offsets` populated on mousedown
+2. `dragging_nodes` cleared on mouseup
+3. Loop iterating `dragging_nodes` in `handle_move_internal()`
+
+---
+
+## Responsive Breakpoints
+
+```json
+{
+  "breakpoint": 600.0,
+  "mobile": {
+    "canvas_width": "< 600px",
+    "node_size": "100x35px",
+    "font": "12px",
+    "spacing": "120px H, 50px V",
+    "touch_padding": "+5px"
+  },
+  "desktop": {
+    "canvas_width": ">= 600px",
+    "node_size": "120x40px",
+    "font": "14px",
+    "spacing": "150px H, 60px V",
+    "touch_padding": "0px"
+  }
+}
+```
+
+---
+
+## State Invariants (Critical)
+
+```json
+{
+  "must_maintain": [
+    {
+      "rule": "root_id never None after create_root()",
+      "impact": "Root is entry point for tree"
+    },
+    {
+      "rule": "selected_nodes only contains valid IDs",
+      "enforcement": "delete_node() cleans up"
+    },
+    {
+      "rule": "parent.children only contains valid IDs",
+      "enforcement": "delete_node() recursively cleans"
+    },
+    {
+      "rule": "Hit detection matches rendering",
+      "impact": "Clicks work correctly"
+    },
+    {
+      "rule": "Root node cannot be deleted",
+      "enforcement": "delete_node() returns false"
+    }
+  ]
+}
+```
+
+---
+
+## Typical User Flows
+
+### Flow: Create Mind Map
+```
+1. App loads → root node created at canvas center
+2. User types text → clicks "Add Child"
+3. App calls add_child_to_selected()
+4. Child positioned to right of parent
+5. render() draws new node
+```
+
+### Flow: Multi-Select & Drag
+```
+1. User drags in empty space
+2. selection_box created, updates on move
+3. On mouseup: find_nodes_in_rect()
+4. selected_nodes populated
+5. User clicks selected node
+6. drag_offsets calculated for all
+7. On move: all selected nodes update positions
+```
+
+### Flow: Canvas Pan
+```
+Desktop:
+1. User holds Space
+2. is_space_pressed = true
+3. Click → is_panning = true
+4. Move → viewport_offset updates
+5. Release → is_panning = false
+
+Mobile:
+1. User touches with 2 fingers
+2. JS detects touches.length === 2
+3. Calls set_space_pressed(true) + handle_pointer_down()
+4. Move → viewport updates
+5. touchend → set_space_pressed(false)
+```
+
+---
+
+## Testing Checklist
+
+```
+□ Create root node
+□ Add child nodes (multiple levels)
+□ Single-click select node
+□ Drag single node
+□ Area-drag select multiple nodes
+□ Drag multiple nodes together
+□ Space+drag pan canvas (desktop)
+□ 2-finger pan (mobile)
+□ Double-click edit node text
+□ Delete node (verify children deleted)
+□ Try to delete root (should fail)
+□ Resize window (responsive sizing)
+```
+
+---
+
+**Last Updated:** 2025-10-25
+**LLM Note:** Read this file first for high-level context, then consult specific .mdc files for API details

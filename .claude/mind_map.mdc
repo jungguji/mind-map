@@ -1,0 +1,475 @@
+# MindMap - Data Structure
+
+> **File:** `src/mind_map.rs`
+> **Role:** Core data structure for node storage, selection, hierarchy management
+> **Used by:** MindMapApp
+
+---
+
+## Quick Reference
+
+**Primary Responsibilities:**
+- Store all nodes in flat Vec
+- Track selection state (multi-select support)
+- Manage drag state (offsets per node)
+- Provide spatial queries (find nodes at point/in rect)
+- Maintain parent-child relationships
+
+**Key Insight:**
+- Flat Vec storage for performance
+- HashSet/HashMap for O(1) state lookups
+- Parent-child via ID references (no direct pointers)
+
+---
+
+## API Schema
+
+```json
+{
+  "struct": {
+    "name": "MindMap",
+    "visibility": "public",
+    "fields": {
+      "nodes": {
+        "type": "Vec<Node>",
+        "description": "Flat array of all nodes",
+        "access_pattern": "Linear iteration for rendering, ID-based lookup for mutations"
+      },
+      "next_id": {
+        "type": "usize",
+        "description": "Auto-incrementing ID counter",
+        "behavior": "Incremented on each node creation, never decrements"
+      },
+      "root_id": {
+        "type": "Option<usize>",
+        "description": "ID of root node",
+        "invariant": "Set once on create_root(), never changes"
+      },
+      "selected_nodes": {
+        "type": "HashSet<usize>",
+        "description": "Currently selected node IDs",
+        "cardinality": "0 to N (multi-select)"
+      },
+      "dragging_nodes": {
+        "type": "HashSet<usize>",
+        "description": "Nodes being actively dragged",
+        "lifecycle": "Populated on mousedown, cleared on mouseup"
+      },
+      "drag_offsets": {
+        "type": "HashMap<usize, (f64, f64)>",
+        "description": "Cursor-to-node offset for each dragging node",
+        "purpose": "Enables smooth multi-node dragging"
+      }
+    }
+  },
+  "methods": {
+    "lifecycle": {
+      "new": {
+        "signature": "fn new() -> Self",
+        "returns": "Empty MindMap",
+        "initial_state": {
+          "nodes": "[]",
+          "next_id": 0,
+          "root_id": "None",
+          "selected_nodes": "{}",
+          "dragging_nodes": "{}",
+          "drag_offsets": "{}"
+        }
+      },
+      "create_root": {
+        "signature": "fn create_root(&mut self, text: String, x: f64, y: f64) -> usize",
+        "parameters": {
+          "text": "Initial text",
+          "x": "X position (virtual coords)",
+          "y": "Y position (virtual coords)"
+        },
+        "returns": "Root node ID",
+        "side_effects": [
+          "Creates Node with next_id",
+          "Adds to nodes Vec",
+          "Sets root_id",
+          "Auto-selects root node",
+          "Increments next_id"
+        ]
+      },
+      "add_child": {
+        "signature": "fn add_child(&mut self, parent_id: usize, text: String, canvas_width: f64) -> Option<usize>",
+        "parameters": {
+          "parent_id": "Parent node ID",
+          "text": "Child text",
+          "canvas_width": "Canvas width (for responsive spacing)"
+        },
+        "returns": "Some(child_id) or None if parent not found",
+        "positioning": {
+          "horizontal": "parent.x + horizontal_spacing",
+          "vertical": "parent.y + (child_index * vertical_spacing) - offset",
+          "spacing_desktop": {
+            "horizontal": 150.0,
+            "vertical": 60.0
+          },
+          "spacing_mobile": {
+            "horizontal": 120.0,
+            "vertical": 50.0
+          },
+          "breakpoint": 600.0
+        },
+        "side_effects": [
+          "Creates new Node",
+          "Adds to nodes Vec",
+          "Appends child_id to parent.children",
+          "Increments next_id"
+        ]
+      },
+      "delete_node": {
+        "signature": "fn delete_node(&mut self, id: usize) -> bool",
+        "returns": "true if deleted, false if root or not found",
+        "behavior": [
+          "1. Check if id == root_id ’ return false",
+          "2. Recursively delete all children",
+          "3. Remove from parent.children",
+          "4. Remove from nodes Vec",
+          "5. Clean up selection/drag state"
+        ],
+        "protected": "Root node cannot be deleted"
+      }
+    },
+    "queries": {
+      "get_node": {
+        "signature": "fn get_node(&self, id: usize) -> Option<&Node>",
+        "complexity": "O(n) linear search",
+        "usage": "Read-only access"
+      },
+      "get_node_mut": {
+        "signature": "fn get_node_mut(&mut self, id: usize) -> Option<&mut Node>",
+        "complexity": "O(n) linear search",
+        "usage": "Mutations (position, text)"
+      },
+      "find_node_at": {
+        "signature": "fn find_node_at(&self, x: f64, y: f64, canvas_width: f64) -> Option<usize>",
+        "parameters": {
+          "x": "Virtual X coordinate",
+          "y": "Virtual Y coordinate",
+          "canvas_width": "For responsive hit detection"
+        },
+        "returns": "Topmost node ID at (x, y) or None",
+        "algorithm": [
+          "Iterate nodes in REVERSE order (topmost first)",
+          "Call node.contains_point(x, y, canvas_width)",
+          "Return first match"
+        ],
+        "z_order": "Reverse iteration order = paint order"
+      },
+      "find_nodes_in_rect": {
+        "signature": "fn find_nodes_in_rect(&self, x1: f64, y1: f64, x2: f64, y2: f64, _canvas_width: f64) -> Vec<usize>",
+        "parameters": {
+          "x1, y1": "First corner (virtual)",
+          "x2, y2": "Opposite corner (virtual)"
+        },
+        "returns": "All node IDs within rectangle",
+        "algorithm": [
+          "Normalize rectangle (min/max)",
+          "Filter nodes where center is inside bounds",
+          "Collect IDs"
+        ],
+        "note": "Checks node CENTER, not bounding box"
+      }
+    },
+    "selection": {
+      "clear_selection": {
+        "signature": "fn clear_selection(&mut self)",
+        "behavior": "Empties selected_nodes HashSet"
+      }
+    },
+    "mutations": {
+      "update_node_text": {
+        "signature": "fn update_node_text(&mut self, id: usize, text: String)",
+        "behavior": "Updates node.text if found, no-op otherwise"
+      }
+    }
+  }
+}
+```
+
+---
+
+## Data Structure Layout
+
+```json
+{
+  "memory_layout": {
+    "nodes": {
+      "type": "Vec<Node>",
+      "growth": "Append-only (except delete)",
+      "order": "Insertion order = Z-order for rendering"
+    },
+    "id_assignment": {
+      "strategy": "Auto-increment",
+      "uniqueness": "Guaranteed unique per MindMap instance",
+      "reuse": "IDs never reused (even after delete)"
+    },
+    "parent_child": {
+      "representation": "Parent stores Vec<child_id>",
+      "lookup": "O(n) to find parent of a given child",
+      "traversal": "Easy downward (parent ’ children), harder upward"
+    }
+  }
+}
+```
+
+---
+
+## Selection State Management
+
+```json
+{
+  "selection_semantics": {
+    "single_select": {
+      "pattern": "clear_selection() ’ insert(id)",
+      "code": "self.selected_nodes.clear(); self.selected_nodes.insert(id);"
+    },
+    "multi_select_add": {
+      "pattern": "insert(id) without clear",
+      "code": "self.selected_nodes.insert(id);"
+    },
+    "toggle": {
+      "pattern": "Check contains ’ remove or insert",
+      "code": "if self.selected_nodes.contains(&id) { remove } else { insert }"
+    },
+    "area_select": {
+      "pattern": "find_nodes_in_rect ’ clear ’ extend",
+      "code": "let ids = find_nodes_in_rect(...); clear_selection(); selected_nodes.extend(ids);"
+    }
+  },
+  "drag_state": {
+    "setup": "On mousedown, calculate offset for each selected node",
+    "update": "On mousemove, apply offset to each dragging node",
+    "cleanup": "On mouseup, clear dragging_nodes and drag_offsets"
+  }
+}
+```
+
+---
+
+## Common Patterns
+
+### Pattern: Create Mind Map
+```rust
+let mut mind_map = MindMap::new();
+
+// Create root (auto-selected)
+let root = mind_map.create_root("Project".into(), 400.0, 300.0);
+
+// Add children
+let task1 = mind_map.add_child(root, "Task 1".into(), 800.0).unwrap();
+let task2 = mind_map.add_child(root, "Task 2".into(), 800.0).unwrap();
+
+// Add sub-tasks
+mind_map.add_child(task1, "Subtask 1.1".into(), 800.0);
+```
+
+### Pattern: Area Selection ’ Multi-Drag
+```rust
+// 1. User drags selection box
+let ids = mind_map.find_nodes_in_rect(100.0, 100.0, 400.0, 300.0, 800.0);
+mind_map.clear_selection();
+for id in ids { mind_map.selected_nodes.insert(id); }
+
+// 2. User clicks on one selected node to drag all
+let cursor_x = 250.0;
+let cursor_y = 180.0;
+mind_map.drag_offsets.clear();
+mind_map.dragging_nodes.clear();
+
+for &id in &mind_map.selected_nodes {
+    let node = mind_map.get_node(id).unwrap();
+    let offset = (cursor_x - node.x, cursor_y - node.y);
+    mind_map.drag_offsets.insert(id, offset);
+    mind_map.dragging_nodes.insert(id);
+}
+
+// 3. On each mousemove
+for &id in &mind_map.dragging_nodes {
+    let (ox, oy) = mind_map.drag_offsets[&id];
+    let node = mind_map.get_node_mut(id).unwrap();
+    node.x = cursor_x - ox;
+    node.y = cursor_y - oy;
+}
+
+// 4. On mouseup
+mind_map.dragging_nodes.clear();
+mind_map.drag_offsets.clear();
+```
+
+### Pattern: Recursive Delete
+```rust
+// delete_node implementation
+fn delete_node(&mut self, id: usize) -> bool {
+    if self.root_id == Some(id) { return false; }
+
+    // 1. Recursively delete children
+    if let Some(node) = self.get_node(id) {
+        let children = node.children.clone();
+        for child_id in children {
+            self.delete_node(child_id); // Recursive
+        }
+    }
+
+    // 2. Remove from parent
+    for node in &mut self.nodes {
+        node.children.retain(|&cid| cid != id);
+    }
+
+    // 3. Remove from storage
+    self.nodes.retain(|n| n.id != id);
+
+    // 4. Clean up state
+    self.selected_nodes.remove(&id);
+    self.dragging_nodes.remove(&id);
+    self.drag_offsets.remove(&id);
+
+    true
+}
+```
+
+---
+
+## Performance Characteristics
+
+```json
+{
+  "operations": {
+    "create_root": "O(1)",
+    "add_child": "O(n) to find parent + O(1) insert",
+    "get_node": "O(n) linear search",
+    "find_node_at": "O(n) worst case (checks all nodes)",
+    "find_nodes_in_rect": "O(n) always (must check all)",
+    "delete_node": "O(n*d) where d = depth (recursive)",
+    "render_all": "O(n) iterate all nodes"
+  },
+  "typical_load": {
+    "nodes": "10-100",
+    "depth": "3-5 levels",
+    "selected": "1-10 nodes",
+    "conclusion": "O(n) operations are fast enough"
+  }
+}
+```
+
+---
+
+## Design Rationale
+
+```json
+{
+  "why_flat_vec": {
+    "pros": [
+      "Cache-friendly iteration",
+      "Simple memory layout",
+      "Easy serialization",
+      "Natural Z-order (insertion order)"
+    ],
+    "cons": [
+      "O(n) lookups by ID",
+      "No spatial indexing"
+    ],
+    "verdict": "Acceptable for <1000 nodes"
+  },
+  "why_hashset_selection": {
+    "pros": [
+      "O(1) contains check",
+      "Automatic deduplication",
+      "Easy set operations"
+    ],
+    "cons": [
+      "No ordering"
+    ],
+    "verdict": "Perfect for multi-select"
+  },
+  "why_hashmap_offsets": {
+    "pros": [
+      "Per-node offset tracking",
+      "O(1) lookup during drag"
+    ],
+    "cons": [
+      "Extra memory during drag"
+    ],
+    "verdict": "Temporary data, acceptable"
+  },
+  "why_id_references": {
+    "pros": [
+      "No Rust lifetime issues",
+      "Easy cloning",
+      "Serializable"
+    ],
+    "cons": [
+      "Manual lookups required",
+      "Dangling ID possible (mitigated by delete cleanup)"
+    ],
+    "verdict": "Simplicity wins"
+  }
+}
+```
+
+---
+
+## Invariants
+
+```json
+{
+  "invariants": [
+    {
+      "rule": "root_id is always Some after create_root()",
+      "enforced_by": "create_root() sets it, never cleared"
+    },
+    {
+      "rule": "next_id always increases",
+      "enforced_by": "Only incremented, never decremented"
+    },
+    {
+      "rule": "All child IDs in parent.children exist in nodes",
+      "enforced_by": "delete_node() cleans up parent.children"
+    },
+    {
+      "rule": "selected_nodes/dragging_nodes contain only valid IDs",
+      "enforced_by": "delete_node() removes from all sets"
+    },
+    {
+      "rule": "Root node cannot be deleted",
+      "enforced_by": "delete_node() returns false if id == root_id"
+    }
+  ]
+}
+```
+
+---
+
+## Future Optimizations
+
+```json
+{
+  "possible_improvements": {
+    "spatial_index": {
+      "structure": "QuadTree or R-Tree",
+      "benefit": "O(log n) for find_node_at",
+      "cost": "Complexity, memory overhead",
+      "when": ">1000 nodes"
+    },
+    "id_index": {
+      "structure": "HashMap<usize, &Node>",
+      "benefit": "O(1) get_node",
+      "cost": "Lifetime complexity",
+      "when": "Frequent lookups"
+    },
+    "dirty_tracking": {
+      "structure": "HashSet<usize> of modified nodes",
+      "benefit": "Partial redraws",
+      "cost": "State management",
+      "when": "Large maps"
+    }
+  }
+}
+```
+
+---
+
+**Last Updated:** 2025-10-25
