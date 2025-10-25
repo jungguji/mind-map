@@ -2,6 +2,14 @@ use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, MouseEvent, KeyboardEvent};
 use crate::mind_map::MindMap;
 
+// 영역 선택 박스
+struct SelectionBox {
+    start_x: f64,
+    start_y: f64,
+    end_x: f64,
+    end_y: f64,
+}
+
 #[wasm_bindgen]
 pub struct MindMapApp {
     canvas: HtmlCanvasElement,
@@ -14,6 +22,10 @@ pub struct MindMapApp {
     is_panning: bool,
     pan_start_x: f64,
     pan_start_y: f64,
+    // Space key state
+    is_space_pressed: bool,
+    // Selection box for area selection
+    selection_box: Option<SelectionBox>,
 }
 
 #[wasm_bindgen]
@@ -44,6 +56,8 @@ impl MindMapApp {
             is_panning: false,
             pan_start_x: 0.0,
             pan_start_y: 0.0,
+            is_space_pressed: false,
+            selection_box: None,
         })
     }
 
@@ -81,7 +95,7 @@ impl MindMapApp {
 
         // Draw nodes with viewport offset
         for node in &self.mind_map.nodes {
-            let is_selected = self.mind_map.selected_node == Some(node.id);
+            let is_selected = self.mind_map.selected_nodes.contains(&node.id);
 
             self.context.set_fill_style_str(
                 if is_selected { "#4CAF50" } else { "#2196F3" }
@@ -92,8 +106,14 @@ impl MindMapApp {
 
             self.context.fill_rect(x, y, node_width, node_height);
 
-            self.context.set_stroke_style_str("#fff");
-            self.context.set_line_width(2.0);
+            // 선택된 노드는 테두리 강조
+            if is_selected {
+                self.context.set_stroke_style_str("#fff");
+                self.context.set_line_width(3.0);
+            } else {
+                self.context.set_stroke_style_str("#fff");
+                self.context.set_line_width(2.0);
+            }
             self.context.stroke_rect(x, y, node_width, node_height);
 
             self.context.set_fill_style_str("#fff");
@@ -109,34 +129,70 @@ impl MindMapApp {
                 node.y + self.viewport_offset_y
             );
         }
+
+        // 영역 선택 박스 렌더링
+        if let Some(ref box_) = self.selection_box {
+            self.context.set_stroke_style_str("#4CAF50");
+            self.context.set_line_width(2.0);
+            self.context.set_fill_style_str("rgba(76, 175, 80, 0.1)");
+
+            let x = box_.start_x.min(box_.end_x);
+            let y = box_.start_y.min(box_.end_y);
+            let w = (box_.end_x - box_.start_x).abs();
+            let h = (box_.end_y - box_.start_y).abs();
+
+            self.context.fill_rect(x, y, w, h);
+            self.context.stroke_rect(x, y, w, h);
+        }
     }
 
     // 내부 함수: 좌표 기반 마우스 다운 처리
     fn handle_down_internal(&mut self, x: f64, y: f64) {
         let canvas_width = self.canvas.width() as f64;
 
+        // Space 키가 눌려있으면 무조건 패닝
+        if self.is_space_pressed {
+            self.is_panning = true;
+            self.pan_start_x = x;
+            self.pan_start_y = y;
+            return;
+        }
+
         // Convert screen coordinates to virtual canvas coordinates
         let virtual_x = x - self.viewport_offset_x;
         let virtual_y = y - self.viewport_offset_y;
 
         if let Some(node_id) = self.mind_map.find_node_at(virtual_x, virtual_y, canvas_width) {
-            // Node found - start dragging node
-            self.mind_map.selected_node = Some(node_id);
-            self.mind_map.dragging_node = Some(node_id);
+            // Node found
+            let was_selected = self.mind_map.selected_nodes.contains(&node_id);
 
-            if let Some(node) = self.mind_map.get_node(node_id) {
-                let node_x = node.x;
-                let node_y = node.y;
-                self.mind_map.drag_offset_x = virtual_x - node_x;
-                self.mind_map.drag_offset_y = virtual_y - node_y;
+            if !was_selected {
+                // 선택되지 않은 노드 클릭 → 기존 선택 해제 후 새로 선택
+                self.mind_map.clear_selection();
+                self.mind_map.selected_nodes.insert(node_id);
+            }
+
+            // 선택된 모든 노드의 드래그 오프셋 계산
+            self.mind_map.drag_offsets.clear();
+            for &selected_id in &self.mind_map.selected_nodes {
+                if let Some(node) = self.mind_map.get_node(selected_id) {
+                    let offset_x = virtual_x - node.x;
+                    let offset_y = virtual_y - node.y;
+                    self.mind_map.drag_offsets.insert(selected_id, (offset_x, offset_y));
+                    self.mind_map.dragging_nodes.insert(selected_id);
+                }
             }
 
             self.render();
         } else {
-            // No node found - start panning canvas
-            self.is_panning = true;
-            self.pan_start_x = x;
-            self.pan_start_y = y;
+            // No node found - start selection box
+            self.selection_box = Some(SelectionBox {
+                start_x: x,
+                start_y: y,
+                end_x: x,
+                end_y: y,
+            });
+            self.render();
         }
     }
 
@@ -165,17 +221,25 @@ impl MindMapApp {
             self.pan_start_y = y;
 
             self.render();
-        } else if let Some(node_id) = self.mind_map.dragging_node {
-            // Dragging node
+        } else if let Some(ref mut box_) = self.selection_box {
+            // 영역 선택 박스 크기 업데이트
+            box_.end_x = x;
+            box_.end_y = y;
+            self.render();
+        } else if !self.mind_map.dragging_nodes.is_empty() {
+            // 멀티 노드 드래그
             let virtual_x = x - self.viewport_offset_x;
             let virtual_y = y - self.viewport_offset_y;
 
-            let offset_x = self.mind_map.drag_offset_x;
-            let offset_y = self.mind_map.drag_offset_y;
+            let dragging_ids: Vec<usize> = self.mind_map.dragging_nodes.iter().copied().collect();
 
-            if let Some(node) = self.mind_map.get_node_mut(node_id) {
-                node.x = virtual_x - offset_x;
-                node.y = virtual_y - offset_y;
+            for node_id in dragging_ids {
+                if let Some(&(offset_x, offset_y)) = self.mind_map.drag_offsets.get(&node_id) {
+                    if let Some(node) = self.mind_map.get_node_mut(node_id) {
+                        node.x = virtual_x - offset_x;
+                        node.y = virtual_y - offset_y;
+                    }
+                }
             }
 
             self.render();
@@ -195,7 +259,32 @@ impl MindMapApp {
 
     // 내부 함수: 마우스 업 처리
     fn handle_up_internal(&mut self) {
-        self.mind_map.dragging_node = None;
+        // 영역 선택 완료
+        if let Some(box_) = self.selection_box.take() {
+            let canvas_width = self.canvas.width() as f64;
+
+            // 화면 좌표를 가상 좌표로 변환
+            let virtual_x1 = box_.start_x - self.viewport_offset_x;
+            let virtual_y1 = box_.start_y - self.viewport_offset_y;
+            let virtual_x2 = box_.end_x - self.viewport_offset_x;
+            let virtual_y2 = box_.end_y - self.viewport_offset_y;
+
+            // 사각형 안의 노드들 찾기
+            let nodes_in_rect = self.mind_map.find_nodes_in_rect(
+                virtual_x1, virtual_y1, virtual_x2, virtual_y2, canvas_width
+            );
+
+            // 선택 업데이트
+            self.mind_map.clear_selection();
+            for node_id in nodes_in_rect {
+                self.mind_map.selected_nodes.insert(node_id);
+            }
+
+            self.render();
+        }
+
+        self.mind_map.dragging_nodes.clear();
+        self.mind_map.drag_offsets.clear();
         self.is_panning = false;
     }
 
@@ -208,37 +297,59 @@ impl MindMapApp {
         self.handle_up_internal();
     }
 
+    // Space 키 상태 설정
+    pub fn set_space_pressed(&mut self, pressed: bool) {
+        self.is_space_pressed = pressed;
+    }
+
     pub fn add_child_to_selected(&mut self, text: String) {
-        if let Some(selected_id) = self.mind_map.selected_node {
-            let canvas_width = self.canvas.width() as f64;
-            self.mind_map.add_child(selected_id, text, canvas_width);
-            self.render();
+        // 선택된 노드가 하나일 때만 자식 추가
+        if self.mind_map.selected_nodes.len() == 1 {
+            if let Some(&selected_id) = self.mind_map.selected_nodes.iter().next() {
+                let canvas_width = self.canvas.width() as f64;
+                self.mind_map.add_child(selected_id, text, canvas_width);
+                self.render();
+            }
         }
     }
 
     pub fn update_selected_text(&mut self, text: String) {
-        if let Some(selected_id) = self.mind_map.selected_node {
-            self.mind_map.update_node_text(selected_id, text);
-            self.render();
+        // 선택된 노드가 하나일 때만 텍스트 업데이트
+        if self.mind_map.selected_nodes.len() == 1 {
+            if let Some(&selected_id) = self.mind_map.selected_nodes.iter().next() {
+                self.mind_map.update_node_text(selected_id, text);
+                self.render();
+            }
         }
     }
 
     pub fn get_selected_text(&self) -> Option<String> {
-        self.mind_map.selected_node
-            .and_then(|id| self.mind_map.get_node(id))
-            .map(|node| node.text.clone())
+        // 선택된 노드가 하나일 때만 텍스트 반환
+        if self.mind_map.selected_nodes.len() == 1 {
+            self.mind_map.selected_nodes.iter().next()
+                .and_then(|&id| self.mind_map.get_node(id))
+                .map(|node| node.text.clone())
+        } else {
+            None
+        }
     }
 
     pub fn delete_selected_node(&mut self) -> bool {
-        if let Some(selected_id) = self.mind_map.selected_node {
-            let deleted = self.mind_map.delete_node(selected_id);
-            if deleted {
-                self.render();
+        // 선택된 모든 노드 삭제
+        let selected_ids: Vec<usize> = self.mind_map.selected_nodes.iter().copied().collect();
+        let mut any_deleted = false;
+
+        for selected_id in selected_ids {
+            if self.mind_map.delete_node(selected_id) {
+                any_deleted = true;
             }
-            deleted
-        } else {
-            false
         }
+
+        if any_deleted {
+            self.render();
+        }
+
+        any_deleted
     }
 
     pub fn handle_key_down(&mut self, event: KeyboardEvent) {
@@ -252,8 +363,12 @@ impl MindMapApp {
     fn handle_double_click_internal(&mut self, x: f64, y: f64) {
         let canvas_width = self.canvas.width() as f64;
 
-        if let Some(node_id) = self.mind_map.find_node_at(x, y, canvas_width) {
-            self.mind_map.selected_node = Some(node_id);
+        let virtual_x = x - self.viewport_offset_x;
+        let virtual_y = y - self.viewport_offset_y;
+
+        if let Some(node_id) = self.mind_map.find_node_at(virtual_x, virtual_y, canvas_width) {
+            self.mind_map.clear_selection();
+            self.mind_map.selected_nodes.insert(node_id);
             self.render();
         }
     }

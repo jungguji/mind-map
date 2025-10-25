@@ -1,13 +1,13 @@
 use crate::node::Node;
+use std::collections::{HashSet, HashMap};
 
 pub struct MindMap {
     pub nodes: Vec<Node>,
     pub next_id: usize,
     pub root_id: Option<usize>,
-    pub selected_node: Option<usize>,
-    pub dragging_node: Option<usize>,
-    pub drag_offset_x: f64,
-    pub drag_offset_y: f64,
+    pub selected_nodes: HashSet<usize>,  // 멀티 선택 지원
+    pub dragging_nodes: HashSet<usize>,  // 멀티 드래그 지원
+    pub drag_offsets: HashMap<usize, (f64, f64)>,  // 각 노드의 드래그 오프셋
 }
 
 impl MindMap {
@@ -16,10 +16,9 @@ impl MindMap {
             nodes: Vec::new(),
             next_id: 0,
             root_id: None,
-            selected_node: None,
-            dragging_node: None,
-            drag_offset_x: 0.0,
-            drag_offset_y: 0.0,
+            selected_nodes: HashSet::new(),
+            dragging_nodes: HashSet::new(),
+            drag_offsets: HashMap::new(),
         }
     }
 
@@ -29,7 +28,7 @@ impl MindMap {
         let node = Node::new(id, text, x, y);
         self.nodes.push(node);
         self.root_id = Some(id);
-        self.selected_node = Some(id);
+        self.selected_nodes.insert(id);
         id
     }
 
@@ -75,6 +74,27 @@ impl MindMap {
         None
     }
 
+    // 사각형 영역 내의 모든 노드를 찾는 함수
+    pub fn find_nodes_in_rect(&self, x1: f64, y1: f64, x2: f64, y2: f64, _canvas_width: f64) -> Vec<usize> {
+        let min_x = x1.min(x2);
+        let max_x = x1.max(x2);
+        let min_y = y1.min(y2);
+        let max_y = y1.max(y2);
+
+        self.nodes.iter()
+            .filter(|node| {
+                node.x >= min_x && node.x <= max_x &&
+                node.y >= min_y && node.y <= max_y
+            })
+            .map(|node| node.id)
+            .collect()
+    }
+
+    // 모든 선택 해제
+    pub fn clear_selection(&mut self) {
+        self.selected_nodes.clear();
+    }
+
     pub fn update_node_text(&mut self, id: usize, text: String) {
         if let Some(node) = self.get_node_mut(id) {
             node.text = text;
@@ -104,9 +124,9 @@ impl MindMap {
         self.nodes.retain(|n| n.id != id);
 
         // 선택된 노드가 삭제된 경우 선택 해제
-        if self.selected_node == Some(id) {
-            self.selected_node = None;
-        }
+        self.selected_nodes.remove(&id);
+        self.dragging_nodes.remove(&id);
+        self.drag_offsets.remove(&id);
 
         true
     }

@@ -229,13 +229,14 @@
     <div class="info">
         <h3>사용 방법</h3>
         <ul>
-            <li>노드를 클릭하여 선택합니다 (선택된 노드는 초록색)</li>
-            <li>노드를 드래그하여 위치를 이동할 수 있습니다</li>
-            <li>빈 공간을 드래그하면 캔버스를 이동할 수 있습니다 (패닝)</li>
-            <li>노드를 더블클릭하면 텍스트를 수정할 수 있습니다</li>
-            <li>텍스트를 입력하고 "자식 노드 추가" 버튼을 클릭하면 선택된 노드의 자식이 추가됩니다</li>
-            <li>"선택한 노드 수정" 버튼으로 선택된 노드의 텍스트를 변경할 수 있습니다</li>
-            <li>"선택한 노드 삭제" 버튼 또는 Delete/Backspace 키로 선택된 노드를 삭제할 수 있습니다 (Root 노드는 삭제 불가)</li>
+            <li><strong>노드 선택:</strong> 노드를 클릭하여 선택 (선택된 노드는 초록색, 테두리 두껍게 표시)</li>
+            <li><strong>멀티 선택:</strong> 빈 공간을 드래그하여 박스로 여러 노드를 선택</li>
+            <li><strong>노드 이동:</strong> 선택된 노드를 드래그하여 이동 (여러 노드 선택 시 함께 이동)</li>
+            <li><strong>캔버스 패닝 (데스크톱):</strong> Space 키를 누른 채로 드래그</li>
+            <li><strong>캔버스 패닝 (모바일):</strong> 2손가락으로 드래그</li>
+            <li><strong>노드 편집:</strong> 노드를 더블클릭하여 텍스트 수정</li>
+            <li><strong>자식 노드 추가:</strong> 노드를 하나만 선택한 상태에서 텍스트 입력 후 "자식 노드 추가" 버튼 클릭</li>
+            <li><strong>노드 삭제:</strong> 선택된 노드를 Delete/Backspace 키로 삭제 (Root 노드는 삭제 불가, 여러 노드 동시 삭제 가능)</li>
         </ul>
     </div>
 
@@ -305,17 +306,58 @@
             // Touch events (모바일 지원)
             let lastTouchTime = 0;
             let touchStartCoords = null;
+            let longPressTimer = null;
+            let isTwoFingerTouch = false;
+            let twoFingerStartDistance = 0;
+
+            function getTwoFingerDistance(e) {
+                if (e.touches.length >= 2) {
+                    const dx = e.touches[0].clientX - e.touches[1].clientX;
+                    const dy = e.touches[0].clientY - e.touches[1].clientY;
+                    return Math.sqrt(dx * dx + dy * dy);
+                }
+                return 0;
+            }
 
             canvas.addEventListener('touchstart', (e) => {
                 e.preventDefault();
+
+                // 2손가락 터치 감지 → 패닝 모드
+                if (e.touches.length === 2) {
+                    isTwoFingerTouch = true;
+                    twoFingerStartDistance = getTwoFingerDistance(e);
+
+                    // 2손가락 중심점 계산
+                    const rect = canvas.getBoundingClientRect();
+                    const centerX = ((e.touches[0].clientX + e.touches[1].clientX) / 2) - rect.left;
+                    const centerY = ((e.touches[0].clientY + e.touches[1].clientY) / 2) - rect.top;
+
+                    // 패닝 모드 시작 (Space 키 누른 것처럼 동작)
+                    app.set_space_pressed(true);
+                    app.handle_pointer_down(centerX, centerY);
+                    return;
+                }
+
                 const coords = getEventCoordinates(e);
                 touchStartCoords = coords;
+
+                // 길게 누르기 타이머 시작 (500ms)
+                longPressTimer = setTimeout(() => {
+                    // 진동 피드백 (지원되는 경우)
+                    if (navigator.vibrate) {
+                        navigator.vibrate(50);
+                    }
+                    // TODO: 멀티선택 모드 진입 알림 (현재는 영역 선택으로 처리)
+                    longPressTimer = null;
+                }, 500);
 
                 // 더블 탭 감지
                 const currentTime = new Date().getTime();
                 const tapLength = currentTime - lastTouchTime;
                 if (tapLength < 300 && tapLength > 0) {
                     // 더블 탭 - 새로운 좌표 기반 함수 사용
+                    clearTimeout(longPressTimer);
+                    longPressTimer = null;
                     app.handle_pointer_double_click(coords.offsetX, coords.offsetY);
                     const selectedText = app.get_selected_text();
                     if (selectedText) {
@@ -331,6 +373,22 @@
 
             canvas.addEventListener('touchmove', (e) => {
                 e.preventDefault();
+
+                // 길게 누르기 타이머 취소 (움직임 감지)
+                if (longPressTimer) {
+                    clearTimeout(longPressTimer);
+                    longPressTimer = null;
+                }
+
+                // 2손가락 터치: 중심점 기준으로 이동
+                if (isTwoFingerTouch && e.touches.length === 2) {
+                    const rect = canvas.getBoundingClientRect();
+                    const centerX = ((e.touches[0].clientX + e.touches[1].clientX) / 2) - rect.left;
+                    const centerY = ((e.touches[0].clientY + e.touches[1].clientY) / 2) - rect.top;
+                    app.handle_pointer_move(centerX, centerY);
+                    return;
+                }
+
                 const coords = getEventCoordinates(e);
                 // 새로운 좌표 기반 함수 사용
                 app.handle_pointer_move(coords.offsetX, coords.offsetY);
@@ -338,6 +396,19 @@
 
             canvas.addEventListener('touchend', (e) => {
                 e.preventDefault();
+
+                // 길게 누르기 타이머 취소
+                if (longPressTimer) {
+                    clearTimeout(longPressTimer);
+                    longPressTimer = null;
+                }
+
+                // 2손가락 터치 종료
+                if (isTwoFingerTouch) {
+                    isTwoFingerTouch = false;
+                    app.set_space_pressed(false);
+                }
+
                 // 새로운 좌표 기반 함수 사용 (좌표 불필요)
                 app.handle_pointer_up();
                 touchStartCoords = null;
@@ -415,9 +486,22 @@
 
             // Keyboard events
             document.addEventListener('keydown', (e) => {
+                // Space 키 감지
+                if (e.code === 'Space' && !isEditing) {
+                    e.preventDefault(); // 페이지 스크롤 방지
+                    app.set_space_pressed(true);
+                }
+
                 // 인라인 편집 중일 때는 노드 삭제 키를 무시
                 if (!isEditing) {
                     app.handle_key_down(e);
+                }
+            });
+
+            document.addEventListener('keyup', (e) => {
+                // Space 키 해제
+                if (e.code === 'Space') {
+                    app.set_space_pressed(false);
                 }
             });
 
