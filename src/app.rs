@@ -354,7 +354,7 @@ impl MindMapApp {
 
     pub fn handle_key_down(&mut self, event: KeyboardEvent) {
         let key = event.key();
-        if key == "Delete" || key == "Backspace" {
+        if key == "Delete" {
             self.delete_selected_node();
         }
     }
