@@ -486,8 +486,8 @@
 
             // Keyboard events
             document.addEventListener('keydown', (e) => {
-                // Space 키 감지
-                if (e.code === 'Space' && !isEditing) {
+                // Space 키 감지 (인라인 편집 중이거나 nodeText 입력 중일 때는 무시)
+                if (e.code === 'Space' && !isEditing && document.activeElement.id !== 'nodeText') {
                     e.preventDefault(); // 페이지 스크롤 방지
                     app.set_space_pressed(true);
                 }
