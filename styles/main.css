@@ -1,0 +1,211 @@
+/* Global Styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    background: #f5f5f5;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    overflow-x: hidden;
+}
+
+h1 {
+    margin-bottom: 20px;
+    color: #333;
+    font-size: clamp(1.5rem, 5vw, 2rem);
+}
+
+/* Controls */
+.controls {
+    margin-bottom: 20px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    width: 100%;
+    max-width: 800px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+input[type="text"] {
+    padding: 8px 12px;
+    border: 2px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    width: 200px;
+    min-height: 44px;
+}
+
+button {
+    padding: 8px 16px;
+    background: #2196F3;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.3s;
+    min-height: 44px;
+    white-space: nowrap;
+}
+
+button:hover {
+    background: #1976D2;
+}
+
+button:active {
+    background: #0D47A1;
+}
+
+button.delete {
+    background: #f44336;
+}
+
+button.delete:hover {
+    background: #d32f2f;
+}
+
+button.delete:active {
+    background: #b71c1c;
+}
+
+/* Canvas */
+#canvas {
+    border: 2px solid #ddd;
+    background: white;
+    cursor: move;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    touch-action: none;
+    max-width: 100%;
+    display: block;
+}
+
+/* Info Section */
+.info {
+    margin-top: 20px;
+    padding: 15px;
+    background: white;
+    border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    max-width: 800px;
+    width: 100%;
+}
+
+.info h3 {
+    margin-bottom: 10px;
+    color: #2196F3;
+    cursor: pointer;
+    user-select: none;
+}
+
+.info ul {
+    margin-left: 20px;
+}
+
+.info li {
+    margin: 5px 0;
+    color: #666;
+    font-size: 14px;
+}
+
+/* Edit Input */
+#editInput {
+    position: absolute;
+    display: none;
+    padding: 8px 12px;
+    border: 2px solid #4CAF50;
+    border-radius: 4px;
+    font-size: 14px;
+    font-family: Arial, sans-serif;
+    text-align: center;
+    background: white;
+    z-index: 1000;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+#editInput:focus {
+    outline: none;
+    border-color: #2196F3;
+}
+
+/* Mobile Responsive Styles */
+@media screen and (max-width: 768px) {
+    body {
+        padding: 10px;
+    }
+
+    h1 {
+        margin-bottom: 15px;
+        font-size: 1.5rem;
+    }
+
+    .controls {
+        flex-direction: column;
+        gap: 8px;
+        margin-bottom: 15px;
+    }
+
+    input[type="text"] {
+        width: 100%;
+        max-width: 300px;
+        font-size: 16px;
+    }
+
+    button {
+        width: 100%;
+        max-width: 300px;
+        padding: 12px 16px;
+        font-size: 16px;
+    }
+
+    #canvas {
+        border: 1px solid #ddd;
+    }
+
+    .info {
+        padding: 12px;
+        font-size: 14px;
+    }
+
+    .info h3::after {
+        content: ' ▼';
+        font-size: 0.8em;
+    }
+
+    .info.collapsed h3::after {
+        content: ' ▶';
+    }
+
+    .info.collapsed ul {
+        display: none;
+    }
+
+    .info li {
+        font-size: 13px;
+    }
+
+    #editInput {
+        font-size: 16px;
+        min-width: 200px;
+    }
+}
+
+@media screen and (max-width: 480px) {
+    body {
+        padding: 5px;
+    }
+
+    h1 {
+        font-size: 1.3rem;
+    }
+
+    .info {
+        padding: 10px;
+    }
+}

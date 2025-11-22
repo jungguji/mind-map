@@ -4,7 +4,8 @@
       "Bash(cargo install wasm-pack)",
       "Bash(wasm-pack build:*)",
       "Bash(git add:*)",
-      "Bash(git reset:*)"
+      "Bash(git reset:*)",
+      "Bash(mkdir:*)"
     ],
     "deny": [],
     "ask": []
